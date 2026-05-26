@@ -1,0 +1,23 @@
+# rubrics/example_rubric.yaml
+criteria:
+  - name: Correctness
+    weight: 0.40
+    max_points: 40
+    description: |
+      Does the code produce the expected outputs for all test cases?
+      Does it handle edge cases and error conditions correctly?
+  - name: Code Quality
+    weight: 0.25
+    max_points: 25
+    description: |
+      Is the code readable, well-organized, and appropriately commented?
+  - name: Documentation
+    weight: 0.20
+    max_points: 20
+    description: |
+      Are functions documented with docstrings? Is there an explanatory README?
+  - name: Design
+    weight: 0.15
+    max_points: 15
+    description: |
+      Is the solution well-structured? Are abstractions appropriate?

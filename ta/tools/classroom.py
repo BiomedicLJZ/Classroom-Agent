@@ -1,0 +1,192 @@
+# ta/tools/classroom.py
+import json
+from functools import lru_cache
+
+from googleapiclient.discovery import build
+from langchain_core.tools import tool
+from langgraph.types import interrupt
+
+from ta.config import Settings
+from ta.google_auth import get_credentials
+
+
+@lru_cache(maxsize=1)
+def _classroom_service():
+    settings = Settings()
+    creds = get_credentials(settings.google_client_secret_path, settings.google_token_path)
+    return build("classroom", "v1", credentials=creds)
+
+
+@tool
+def list_courses() -> str:
+    """List all active Google Classroom courses the authenticated user has access to."""
+    svc = _classroom_service()
+    response = svc.courses().list(courseStates=["ACTIVE"]).execute()
+    courses = response.get("courses", [])
+    if not courses:
+        return "No active courses found."
+    lines = [f"- [{c['id']}] {c.get('name', 'Unnamed')} — {c.get('section', '')}" for c in courses]
+    return "Active courses:\n" + "\n".join(lines)
+
+
+@tool
+def list_students(course_id: str) -> str:
+    """List all enrolled students in a Google Classroom course."""
+    svc = _classroom_service()
+    response = svc.courses().students().list(courseId=course_id).execute()
+    students = response.get("students", [])
+    if not students:
+        return f"No students found in course {course_id}."
+    lines = []
+    for s in students:
+        profile = s.get("profile", {})
+        name = profile.get("name", {}).get("fullName", "Unknown")
+        email = profile.get("emailAddress", "")
+        lines.append(f"- [{s['userId']}] {name} <{email}>")
+    return f"Students ({len(lines)}):\n" + "\n".join(lines)
+
+
+@tool
+def list_assignments(course_id: str) -> str:
+    """List all coursework (assignments, quizzes) in a Google Classroom course."""
+    svc = _classroom_service()
+    response = svc.courses().courseWork().list(courseId=course_id).execute()
+    items = response.get("courseWork", [])
+    if not items:
+        return f"No assignments found in course {course_id}."
+    lines = [
+        f"- [{cw['id']}] {cw.get('title', 'Untitled')} (max: {cw.get('maxPoints', 'N/A')} pts)"
+        for cw in items
+    ]
+    return "Assignments:\n" + "\n".join(lines)
+
+
+@tool
+def get_submission_status(course_id: str, coursework_id: str) -> str:
+    """Return submission state for every student in an assignment.
+    States: NEW, CREATED, TURNED_IN, RETURNED, RECLAIMED_BY_STUDENT."""
+    svc = _classroom_service()
+    response = (
+        svc.courses().courseWork().studentSubmissions()
+        .list(courseId=course_id, courseWorkId=coursework_id)
+        .execute()
+    )
+    subs = response.get("studentSubmissions", [])
+    if not subs:
+        return "No submissions found."
+    lines = [f"- [{s['userId']}] Submission {s['id']}: {s.get('state', 'UNKNOWN')}" for s in subs]
+    return f"Submission status ({len(lines)} students):\n" + "\n".join(lines)
+
+
+@tool
+def get_submission(course_id: str, coursework_id: str, submission_id: str) -> str:
+    """Fetch a single student submission including attached Drive file IDs."""
+    svc = _classroom_service()
+    sub = (
+        svc.courses().courseWork().studentSubmissions()
+        .get(courseId=course_id, courseWorkId=coursework_id, id=submission_id)
+        .execute()
+    )
+    attachments = [
+        a["driveFile"].get("id", "unknown")
+        for a in sub.get("assignmentSubmission", {}).get("attachments", [])
+        if "driveFile" in a
+    ]
+    return json.dumps({
+        "submission_id": sub["id"],
+        "student_id": sub["userId"],
+        "state": sub.get("state"),
+        "drive_file_ids": attachments,
+        "late": sub.get("late", False),
+    }, indent=2)
+
+
+@tool
+def post_announcement(course_id: str, text: str) -> str:
+    """Post a plain-text announcement to a Google Classroom course. Requires confirmation."""
+    suffix = "..." if len(text) > 200 else ""
+    confirmed = interrupt({
+        "action": "post_announcement",
+        "details": f"Post announcement to course {course_id}:\n\n{text[:200]}{suffix}",
+    })
+    if not confirmed:
+        return "Announcement posting cancelled."
+    svc = _classroom_service()
+    result = svc.courses().announcements().create(
+        courseId=course_id, body={"text": text, "state": "PUBLISHED"}
+    ).execute()
+    return f"Announcement posted (id: {result['id']})."
+
+
+@tool
+def create_assignment(
+    course_id: str,
+    title: str,
+    description: str,
+    max_points: float,
+    due_date: str,
+    due_time: str,
+    materials_drive_ids: list[str],
+) -> str:
+    """Create a new assignment in a Google Classroom course. Requires confirmation.
+    due_date: YYYY-MM-DD format. due_time: HH:MM (24h)."""
+    confirmed = interrupt({
+        "action": "create_assignment",
+        "details": f"Create assignment '{title}' in course {course_id}\n"
+                   f"Max points: {max_points}, Due: {due_date} {due_time}",
+    })
+    if not confirmed:
+        return "Assignment creation cancelled."
+    year, month, day = map(int, due_date.split("-"))
+    hour, minute = map(int, due_time.split(":"))
+    body: dict = {
+        "title": title, "description": description, "maxPoints": max_points,
+        "workType": "ASSIGNMENT", "state": "PUBLISHED",
+        "dueDate": {"year": year, "month": month, "day": day},
+        "dueTime": {"hours": hour, "minutes": minute},
+    }
+    if materials_drive_ids:
+        body["materials"] = [
+            {"driveFile": {"driveFile": {"id": fid}, "shareMode": "VIEW"}}
+            for fid in materials_drive_ids
+        ]
+    svc = _classroom_service()
+    result = svc.courses().courseWork().create(courseId=course_id, body=body).execute()
+    return f"Assignment created (id: {result['id']}, title: {result.get('title')})."
+
+
+@tool
+def create_material(
+    course_id: str,
+    title: str,
+    description: str,
+    drive_file_ids: list[str],
+    youtube_urls: list[str],
+    link_urls: list[str],
+) -> str:
+    """Post study materials (Drive files, YouTube, links) to a course. Requires confirmation."""
+    confirmed = interrupt({
+        "action": "create_material",
+        "details": f"Post material '{title}' to course {course_id}",
+    })
+    if not confirmed:
+        return "Material posting cancelled."
+    materials = []
+    for fid in drive_file_ids:
+        materials.append({"driveFile": {"driveFile": {"id": fid}, "shareMode": "VIEW"}})
+    for url in youtube_urls:
+        video_id = url.split("v=")[-1].split("&")[0]
+        materials.append({"youtubeVideo": {"id": video_id}})
+    for url in link_urls:
+        materials.append({"link": {"url": url}})
+    svc = _classroom_service()
+    result = svc.courses().courseWorkMaterials().create(
+        courseId=course_id,
+        body={
+            "title": title,
+            "description": description,
+            "materials": materials,
+            "state": "PUBLISHED",
+        },
+    ).execute()
+    return f"Material posted (id: {result['id']})."
