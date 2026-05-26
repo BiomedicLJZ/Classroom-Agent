@@ -51,20 +51,26 @@ def run_repl(graph, config: dict) -> None:
             break
 
         try:
-            for chunk in graph.stream(
-                {"messages": [HumanMessage(content=user_input)]}, config, stream_mode="values"
-            ):
-                if "__interrupt__" in chunk:
-                    data = chunk["__interrupt__"][0].value
-                    console.print("\n[bold yellow]⚠ CONFIRMATION REQUIRED[/bold yellow]")
-                    console.print(f"[yellow]Action:[/yellow] {data.get('action', '')}")
-                    console.print(f"[yellow]Details:[/yellow]\n{data.get('details', '')}")
-                    confirmed = input("\nProceed? [y/N]: ").strip().lower() == "y"
-                    for resume_chunk in graph.stream(
-                        Command(resume=confirmed), config, stream_mode="values"
-                    ):
-                        _print_chunk(resume_chunk)
-                else:
-                    _print_chunk(chunk)
+            # stream_input starts as the user message; becomes Command(resume=...) after each
+            # interrupt so we can handle multiple consecutive confirmations in one turn.
+            stream_input: dict | Command = {
+                "messages": [HumanMessage(content=user_input)]
+            }
+            while True:
+                got_interrupt = False
+                for chunk in graph.stream(stream_input, config, stream_mode="values"):
+                    if "__interrupt__" in chunk:
+                        got_interrupt = True
+                        data = chunk["__interrupt__"][0].value
+                        console.print("\n[bold yellow]⚠ CONFIRMATION REQUIRED[/bold yellow]")
+                        console.print(f"[yellow]Action:[/yellow] {data.get('action', '')}")
+                        console.print(f"[yellow]Details:[/yellow]\n{data.get('details', '')}")
+                        confirmed = input("\nProceed? [y/N]: ").strip().lower() == "y"
+                        stream_input = Command(resume=confirmed)
+                        break  # close the paused generator; restart with Command
+                    else:
+                        _print_chunk(chunk)
+                if not got_interrupt:
+                    break  # no interrupt this round — turn is complete
         except Exception as exc:
             console.print(f"[bold red]Error:[/bold red] {exc}")
