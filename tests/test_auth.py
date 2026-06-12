@@ -23,6 +23,23 @@ class TestSettings:
         with pytest.raises(Exception):  # noqa: B017
             Settings()
 
+    def test_reasoning_defaults(self, monkeypatch):
+        monkeypatch.setenv("NVIDIA_API_KEY", "nvapi-test")
+        settings = Settings()
+        assert settings.nvidia_temperature == 1.0
+        assert settings.nvidia_top_p == 0.95
+        assert settings.nvidia_max_tokens == 16384
+        assert settings.nvidia_reasoning_budget == 16384
+        assert settings.nvidia_enable_thinking is True
+
+    def test_reasoning_overridable_from_env(self, monkeypatch):
+        monkeypatch.setenv("NVIDIA_API_KEY", "nvapi-test")
+        monkeypatch.setenv("NVIDIA_TEMPERATURE", "0.3")
+        monkeypatch.setenv("NVIDIA_ENABLE_THINKING", "false")
+        settings = Settings()
+        assert settings.nvidia_temperature == 0.3
+        assert settings.nvidia_enable_thinking is False
+
 
 class TestGetCredentials:
     def _mock_settings(self, mock_settings_cls, secret_path: str, token_path: str):
