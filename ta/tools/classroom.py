@@ -503,3 +503,32 @@ def delete_material(course_id: str, material_id: str) -> str:
     except HttpError as exc:
         return _http_error_msg(exc, course_id=course_id, resource=f"material {material_id}")
     return f"Material {material_id} deleted."
+
+
+@tool
+def list_topics(course_id: str) -> str:
+    """List topics in a course (topicId + name). Use topicId with update_assignment
+    to organize coursework under a topic."""
+    svc = _classroom_service(get_active_account())
+    try:
+        response = svc.courses().topics().list(courseId=course_id).execute()
+    except HttpError as exc:
+        return _http_error_msg(exc, course_id=course_id)
+    topics = response.get("topic", [])
+    if not topics:
+        return f"No topics in course {course_id}."
+    lines = [f"- [{t['topicId']}] {t.get('name', 'Unnamed')}" for t in topics]
+    return f"Topics ({len(lines)}):\n" + "\n".join(lines)
+
+
+@tool
+def create_topic(course_id: str, name: str) -> str:
+    """Create a new topic in a course. Low-risk — no confirmation required."""
+    svc = _classroom_service(get_active_account())
+    try:
+        result = svc.courses().topics().create(
+            courseId=course_id, body={"name": name}
+        ).execute()
+    except HttpError as exc:
+        return _http_error_msg(exc, course_id=course_id)
+    return f"Topic created: [{result['topicId']}] {result['name']}"

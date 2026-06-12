@@ -199,3 +199,28 @@ class TestMaterialAdmin:
             courseId="c1", id="m1"
         )
         assert "deleted" in result
+
+
+class TestTopics:
+    def test_list_topics(self):
+        svc = _service_mock()
+        svc.courses().topics().list().execute.return_value = {
+            "topic": [{"topicId": "t1", "name": "Unit 1"}]
+        }
+        with patch("ta.tools.classroom._classroom_service", return_value=svc):
+            from ta.tools.classroom import list_topics
+            result = list_topics.func(course_id="c1")
+        assert "t1" in result and "Unit 1" in result
+
+    def test_create_topic(self):
+        svc = _service_mock()
+        svc.courses().topics().create().execute.return_value = {
+            "topicId": "t2", "name": "Unit 2"
+        }
+        with patch("ta.tools.classroom._classroom_service", return_value=svc):
+            from ta.tools.classroom import create_topic
+            result = create_topic.func(course_id="c1", name="Unit 2")
+        create_kwargs = svc.courses().topics().create.call_args.kwargs
+        assert create_kwargs["courseId"] == "c1"
+        assert create_kwargs["body"] == {"name": "Unit 2"}
+        assert "t2" in result
