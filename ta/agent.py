@@ -11,7 +11,7 @@ from ta.tools.drive import get_drive_file_text
 from ta.tools.grading import analyze_submission, load_rubric
 from ta.tools.office import read_excel_file, read_pptx_file, read_word_file
 
-SYSTEM_PROMPT = """detailed thinking on
+SYSTEM_PROMPT = """\
 You are a Teaching Assistant (TA) agent for Google Classroom. Operate autonomously — \
 take initiative, draft polished content from rough ideas, and handle admin workflows end-to-end. \
 Only pause for explicit confirmation on destructive/irreversible actions.
@@ -43,7 +43,7 @@ AUTONOMY GUIDELINES:
    with read_excel_file, extract emails, then process each one — report progress as you go.
 """
 
-_GRADING_SUBAGENT_PROMPT = """detailed thinking off
+_GRADING_SUBAGENT_PROMPT = """\
 You are a grading specialist for Google Classroom.
 
 Given a course_id, coursework_id, rubric_path, and assignment_type:
@@ -58,7 +58,15 @@ Do NOT post grades — that is the main agent's responsibility after instructor 
 
 
 def build_agent(settings: Settings):
-    llm = ChatNVIDIA(model=settings.nvidia_model, api_key=settings.nvidia_api_key)
+    llm = ChatNVIDIA(
+        model=settings.nvidia_model,
+        api_key=settings.nvidia_api_key,
+        temperature=settings.nvidia_temperature,
+        top_p=settings.nvidia_top_p,
+        max_tokens=settings.nvidia_max_tokens,
+        reasoning_budget=settings.nvidia_reasoning_budget,
+        chat_template_kwargs={"enable_thinking": settings.nvidia_enable_thinking},
+    )
 
     grading_subagent: SubAgent = {
         "name": "grading_agent",
