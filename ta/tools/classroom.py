@@ -1,6 +1,6 @@
 # ta/tools/classroom.py
 import json
-from functools import lru_cache
+from functools import cache
 
 from googleapiclient.discovery import build
 from googleapiclient.errors import HttpError
@@ -25,7 +25,7 @@ def _http_error_msg(exc: HttpError, course_id: str = "", resource: str = "") -> 
     return f"Google API error {status}: {exc.reason}"
 
 
-@lru_cache(maxsize=None)
+@cache
 def _classroom_service(alias: str):
     creds = get_credentials(alias)
     return build("classroom", "v1", credentials=creds)

@@ -43,6 +43,8 @@ uv sync
    https://www.googleapis.com/auth/classroom.courses.readonly
    https://www.googleapis.com/auth/classroom.coursework.students
    https://www.googleapis.com/auth/classroom.announcements
+   https://www.googleapis.com/auth/classroom.topics
+   https://www.googleapis.com/auth/classroom.courseworkmaterials
    https://www.googleapis.com/auth/classroom.rosters.readonly
    https://www.googleapis.com/auth/classroom.student-submissions.students.readonly
    https://www.googleapis.com/auth/drive
@@ -133,6 +135,26 @@ uv run ruff check ta/ tests/ main.py
 ```
 
 All 29 tests run without real API credentials (Google APIs and NVIDIA LLM are fully mocked).
+
+## Re-authentication required (June 2026 rework)
+
+The agent now requests two additional OAuth scopes (`classroom.topics`,
+`classroom.courseworkmaterials`). Existing tokens are missing them — Classroom
+calls will fail with 403 until you re-authenticate:
+
+1. Delete `credentials/token.json` (and `credentials/uniat_token.json` if present).
+2. Run the agent; the browser consent flow will re-run once per account.
+
+Remember to add the two new scopes to the OAuth consent screen of your Google
+Cloud project first (see Setup step 2).
+
+## Reasoning & streaming
+
+- Nemotron 3 Ultra thinking is ON by default. Raw reasoning streams in dim grey
+  before each answer. Tune via `.env`: `NVIDIA_TEMPERATURE`, `NVIDIA_TOP_P`,
+  `NVIDIA_MAX_TOKENS`, `NVIDIA_REASONING_BUDGET`, `NVIDIA_ENABLE_THINKING`.
+- Every student-facing text you type is improved/rewritten before posting; the
+  confirmation prompt shows the full final text.
 
 ## Tech stack
 

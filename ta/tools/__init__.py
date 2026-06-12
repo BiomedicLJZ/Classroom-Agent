@@ -25,6 +25,14 @@ from ta.tools.classroom import (
 )
 from ta.tools.docs import add_doc_comment, get_doc_text
 from ta.tools.drive import get_drive_file_text, upload_file_to_drive
+from ta.tools.grading import (
+    analyze_submission,
+    batch_grade_assignment,
+    export_grades,
+    load_rubric,
+    post_grade,
+    post_private_comment,
+)
 from ta.tools.office import (
     append_excel_rows,
     append_to_word_file,
@@ -36,14 +44,6 @@ from ta.tools.office import (
     write_excel_file,
     write_pptx_file,
     write_word_file,
-)
-from ta.tools.grading import (
-    analyze_submission,
-    batch_grade_assignment,
-    export_grades,
-    load_rubric,
-    post_grade,
-    post_private_comment,
 )
 
 ALL_TOOLS = [

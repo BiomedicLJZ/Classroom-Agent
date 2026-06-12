@@ -1,6 +1,6 @@
 # ta/tools/drive.py
 import io
-from functools import lru_cache
+from functools import cache
 
 from googleapiclient.discovery import build
 from langchain_core.tools import tool
@@ -68,7 +68,7 @@ def _parse_office_bytes(fmt: str, data: bytes) -> str:
     return "[Unsupported office format]"
 
 
-@lru_cache(maxsize=None)
+@cache
 def _drive_service(alias: str):
     creds = get_credentials(alias)
     return build("drive", "v3", credentials=creds)

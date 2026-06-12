@@ -1,5 +1,5 @@
 # ta/tools/docs.py
-from functools import lru_cache
+from functools import cache
 
 from googleapiclient.discovery import build
 from langchain_core.tools import tool
@@ -9,7 +9,7 @@ from ta.google_auth import get_credentials
 from ta.session import get_active_account
 
 
-@lru_cache(maxsize=None)
+@cache
 def _docs_service(alias: str):
     creds = get_credentials(alias)
     return build("docs", "v1", credentials=creds)
