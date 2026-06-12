@@ -125,3 +125,77 @@ class TestDeleteAssignment:
             result = delete_assignment.func(course_id="c1", coursework_id="w1")
         assert "cancelled" in result.lower()
         svc.courses().courseWork().delete.assert_not_called()
+
+
+class TestAnnouncementAdmin:
+    def test_list_announcements(self):
+        svc = _service_mock()
+        svc.courses().announcements().list().execute.return_value = {
+            "announcements": [
+                {"id": "a1", "state": "PUBLISHED", "text": "Hello class"},
+            ]
+        }
+        with patch("ta.tools.classroom._classroom_service", return_value=svc):
+            from ta.tools.classroom import list_announcements
+            result = list_announcements.func(course_id="c1")
+        assert "a1" in result and "Hello class" in result
+
+    def test_update_announcement_patches_text(self):
+        svc = _service_mock()
+        patch_call = svc.courses().announcements().patch
+        patch_call().execute.return_value = {"id": "a1"}
+        with patch("ta.tools.classroom.interrupt", return_value=True), \
+             patch("ta.tools.classroom._classroom_service", return_value=svc):
+            from ta.tools.classroom import update_announcement
+            update_announcement.func(course_id="c1", announcement_id="a1", text="New text")
+        kwargs = patch_call.call_args.kwargs
+        assert kwargs["updateMask"] == "text"
+        assert kwargs["body"] == {"text": "New text"}
+
+    def test_delete_announcement_cancelled(self):
+        svc = _service_mock()
+        with patch("ta.tools.classroom.interrupt", return_value=False), \
+             patch("ta.tools.classroom._classroom_service", return_value=svc):
+            from ta.tools.classroom import delete_announcement
+            result = delete_announcement.func(course_id="c1", announcement_id="a1")
+        assert "cancelled" in result.lower()
+        svc.courses().announcements().delete.assert_not_called()
+
+
+class TestMaterialAdmin:
+    def test_list_materials(self):
+        svc = _service_mock()
+        svc.courses().courseWorkMaterials().list().execute.return_value = {
+            "courseWorkMaterial": [
+                {"id": "m1", "state": "PUBLISHED", "title": "Slides week 1"},
+            ]
+        }
+        with patch("ta.tools.classroom._classroom_service", return_value=svc):
+            from ta.tools.classroom import list_materials
+            result = list_materials.func(course_id="c1")
+        assert "m1" in result and "Slides week 1" in result
+
+    def test_update_material_patches_title_and_description(self):
+        svc = _service_mock()
+        patch_call = svc.courses().courseWorkMaterials().patch
+        patch_call().execute.return_value = {"id": "m1"}
+        with patch("ta.tools.classroom.interrupt", return_value=True), \
+             patch("ta.tools.classroom._classroom_service", return_value=svc):
+            from ta.tools.classroom import update_material
+            update_material.func(
+                course_id="c1", material_id="m1", title="T2", description="D2"
+            )
+        kwargs = patch_call.call_args.kwargs
+        assert kwargs["updateMask"] == "title,description"
+        assert kwargs["body"] == {"title": "T2", "description": "D2"}
+
+    def test_delete_material_confirmed(self):
+        svc = _service_mock()
+        with patch("ta.tools.classroom.interrupt", return_value=True), \
+             patch("ta.tools.classroom._classroom_service", return_value=svc):
+            from ta.tools.classroom import delete_material
+            result = delete_material.func(course_id="c1", material_id="m1")
+        svc.courses().courseWorkMaterials().delete.assert_called_once_with(
+            courseId="c1", id="m1"
+        )
+        assert "deleted" in result

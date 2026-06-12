@@ -353,3 +353,153 @@ def delete_assignment(course_id: str, coursework_id: str) -> str:
     except HttpError as exc:
         return _http_error_msg(exc, course_id=course_id, resource=f"assignment {coursework_id}")
     return f"Assignment {coursework_id} deleted."
+
+
+@tool
+def list_announcements(course_id: str) -> str:
+    """List announcements in a course with their IDs, newest first."""
+    svc = _classroom_service(get_active_account())
+    try:
+        response = svc.courses().announcements().list(
+            courseId=course_id, orderBy="updateTime desc", pageSize=20
+        ).execute()
+    except HttpError as exc:
+        return _http_error_msg(exc, course_id=course_id)
+    items = response.get("announcements", [])
+    if not items:
+        return f"No announcements in course {course_id}."
+    lines = [
+        f"- [{a['id']}] ({a.get('state', '?')}) {a.get('text', '')[:80]}" for a in items
+    ]
+    return f"Announcements ({len(lines)}):\n" + "\n".join(lines)
+
+
+@tool
+def update_announcement(
+    course_id: str, announcement_id: str, text: str = "", state: str = ""
+) -> str:
+    """Update an announcement's text and/or state (PUBLISHED or DRAFT).
+    Only provided (non-empty) fields change. Requires confirmation."""
+    body: dict = {}
+    mask: list[str] = []
+    if text:
+        body["text"] = text
+        mask.append("text")
+    if state:
+        body["state"] = state.upper()
+        mask.append("state")
+    if not mask:
+        return "Nothing to update — provide text and/or state."
+    details = f"Update announcement {announcement_id} in course {course_id}"
+    if text:
+        details += f"\n\nNew text:\n{text}"
+    confirmed = interrupt({"action": "update_announcement", "details": details})
+    if not confirmed:
+        return "Announcement update cancelled."
+    svc = _classroom_service(get_active_account())
+    try:
+        result = (
+            svc.courses().announcements()
+            .patch(
+                courseId=course_id, id=announcement_id,
+                updateMask=",".join(mask), body=body,
+            )
+            .execute()
+        )
+    except HttpError as exc:
+        return _http_error_msg(
+            exc, course_id=course_id, resource=f"announcement {announcement_id}"
+        )
+    return f"Announcement {result['id']} updated."
+
+
+@tool
+def delete_announcement(course_id: str, announcement_id: str) -> str:
+    """Permanently delete an announcement. Requires confirmation."""
+    confirmed = interrupt({
+        "action": "delete_announcement",
+        "details": f"PERMANENTLY delete announcement {announcement_id} from course {course_id}",
+    })
+    if not confirmed:
+        return "Announcement deletion cancelled."
+    svc = _classroom_service(get_active_account())
+    try:
+        svc.courses().announcements().delete(courseId=course_id, id=announcement_id).execute()
+    except HttpError as exc:
+        return _http_error_msg(
+            exc, course_id=course_id, resource=f"announcement {announcement_id}"
+        )
+    return f"Announcement {announcement_id} deleted."
+
+
+@tool
+def list_materials(course_id: str) -> str:
+    """List courseWork materials in a course with their IDs."""
+    svc = _classroom_service(get_active_account())
+    try:
+        response = svc.courses().courseWorkMaterials().list(
+            courseId=course_id, pageSize=20
+        ).execute()
+    except HttpError as exc:
+        return _http_error_msg(exc, course_id=course_id)
+    items = response.get("courseWorkMaterial", [])
+    if not items:
+        return f"No materials in course {course_id}."
+    lines = [
+        f"- [{m['id']}] ({m.get('state', '?')}) {m.get('title', 'Untitled')}" for m in items
+    ]
+    return f"Materials ({len(lines)}):\n" + "\n".join(lines)
+
+
+@tool
+def update_material(
+    course_id: str, material_id: str, title: str = "", description: str = ""
+) -> str:
+    """Update a material's title and/or description. Only provided (non-empty)
+    fields change. Requires confirmation."""
+    body: dict = {}
+    mask: list[str] = []
+    if title:
+        body["title"] = title
+        mask.append("title")
+    if description:
+        body["description"] = description
+        mask.append("description")
+    if not mask:
+        return "Nothing to update — provide title and/or description."
+    details = f"Update material {material_id} in course {course_id}"
+    if description:
+        details += f"\n\nNew description:\n{description}"
+    confirmed = interrupt({"action": "update_material", "details": details})
+    if not confirmed:
+        return "Material update cancelled."
+    svc = _classroom_service(get_active_account())
+    try:
+        result = (
+            svc.courses().courseWorkMaterials()
+            .patch(
+                courseId=course_id, id=material_id,
+                updateMask=",".join(mask), body=body,
+            )
+            .execute()
+        )
+    except HttpError as exc:
+        return _http_error_msg(exc, course_id=course_id, resource=f"material {material_id}")
+    return f"Material {result['id']} updated."
+
+
+@tool
+def delete_material(course_id: str, material_id: str) -> str:
+    """Permanently delete a courseWork material. Requires confirmation."""
+    confirmed = interrupt({
+        "action": "delete_material",
+        "details": f"PERMANENTLY delete material {material_id} from course {course_id}",
+    })
+    if not confirmed:
+        return "Material deletion cancelled."
+    svc = _classroom_service(get_active_account())
+    try:
+        svc.courses().courseWorkMaterials().delete(courseId=course_id, id=material_id).execute()
+    except HttpError as exc:
+        return _http_error_msg(exc, course_id=course_id, resource=f"material {material_id}")
+    return f"Material {material_id} deleted."
