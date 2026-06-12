@@ -210,3 +210,53 @@ def batch_grade_assignment(
         + "\n".join(lines)
         + "\n\nCall post_grade for each student to publish grades."
     )
+
+
+@tool
+def export_grades(course_id: str, output_path: str) -> str:
+    """Export all grades for a course to an .xlsx file: one row per student, one
+    column per assignment, cell = assignedGrade (empty when not graded yet)."""
+    from openpyxl import Workbook
+
+    from ta.tools.classroom import _classroom_service
+
+    svc = _classroom_service(get_active_account())
+    roster = svc.courses().students().list(courseId=course_id).execute().get("students", [])
+    coursework = (
+        svc.courses().courseWork().list(courseId=course_id).execute().get("courseWork", [])
+    )
+    if not roster:
+        return f"No students in course {course_id}."
+    if not coursework:
+        return f"No coursework in course {course_id}."
+
+    grades: dict[str, dict[str, float]] = {}
+    for cw in coursework:
+        subs = (
+            svc.courses().courseWork().studentSubmissions()
+            .list(courseId=course_id, courseWorkId=cw["id"])
+            .execute()
+            .get("studentSubmissions", [])
+        )
+        for sub in subs:
+            if "assignedGrade" in sub:
+                grades.setdefault(sub["userId"], {})[cw["id"]] = sub["assignedGrade"]
+
+    wb = Workbook()
+    ws = wb.active
+    ws.title = "Grades"
+    ws.append(["Student", "Email"] + [cw.get("title", cw["id"]) for cw in coursework])
+    for student in roster:
+        profile = student.get("profile", {})
+        row = [
+            profile.get("name", {}).get("fullName", "Unknown"),
+            profile.get("emailAddress", ""),
+        ]
+        student_grades = grades.get(student["userId"], {})
+        row += [student_grades.get(cw["id"]) for cw in coursework]
+        ws.append(row)
+    wb.save(output_path)
+    return (
+        f"Grades exported: {len(roster)} students × {len(coursework)} assignments "
+        f"→ {output_path}"
+    )

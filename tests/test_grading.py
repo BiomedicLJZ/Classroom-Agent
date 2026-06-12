@@ -37,3 +37,52 @@ class TestGradingLLM:
                 submission_text="print('hi')", rubric_json="[]", assignment_type="code"
             )
         assert '"score": 5.0' in result
+
+
+class TestExportGrades:
+    def test_exports_matrix_to_xlsx(self, tmp_path):
+        svc = MagicMock()
+        svc.courses().students().list().execute.return_value = {
+            "students": [
+                {
+                    "userId": "s1",
+                    "profile": {
+                        "name": {"fullName": "Ana López"},
+                        "emailAddress": "ana@school.mx",
+                    },
+                },
+                {
+                    "userId": "s2",
+                    "profile": {
+                        "name": {"fullName": "Beto Ruiz"},
+                        "emailAddress": "beto@school.mx",
+                    },
+                },
+            ]
+        }
+        svc.courses().courseWork().list().execute.return_value = {
+            "courseWork": [{"id": "w1", "title": "HW1"}, {"id": "w2", "title": "HW2"}]
+        }
+        svc.courses().courseWork().studentSubmissions().list().execute.side_effect = [
+            {"studentSubmissions": [
+                {"userId": "s1", "assignedGrade": 9.5},
+                {"userId": "s2"},  # ungraded
+            ]},
+            {"studentSubmissions": [
+                {"userId": "s1", "assignedGrade": 8.0},
+                {"userId": "s2", "assignedGrade": 10.0},
+            ]},
+        ]
+        out = tmp_path / "grades.xlsx"
+        with patch("ta.tools.classroom._classroom_service", return_value=svc):
+            from ta.tools.grading import export_grades
+            result = export_grades.func(course_id="c1", output_path=str(out))
+
+        assert out.exists()
+        from openpyxl import load_workbook
+        ws = load_workbook(out)["Grades"]
+        rows = list(ws.values)
+        assert rows[0] == ("Student", "Email", "HW1", "HW2")
+        assert rows[1] == ("Ana López", "ana@school.mx", 9.5, 8.0)
+        assert rows[2] == ("Beto Ruiz", "beto@school.mx", None, 10.0)
+        assert "2 students" in result
