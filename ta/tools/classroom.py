@@ -118,10 +118,9 @@ def get_submission(course_id: str, coursework_id: str, submission_id: str) -> st
 @tool
 def post_announcement(course_id: str, text: str) -> str:
     """Post a plain-text announcement to a Google Classroom course. Requires confirmation."""
-    suffix = "..." if len(text) > 200 else ""
     confirmed = interrupt({
         "action": "post_announcement",
-        "details": f"Post announcement to course {course_id}:\n\n{text[:200]}{suffix}",
+        "details": f"Post announcement to course {course_id}:\n\n{text}",
     })
     if not confirmed:
         return "Announcement posting cancelled."
@@ -149,8 +148,11 @@ def create_assignment(
     due_date: YYYY-MM-DD format. due_time: HH:MM (24h)."""
     confirmed = interrupt({
         "action": "create_assignment",
-        "details": f"Create assignment '{title}' in course {course_id}\n"
-                   f"Max points: {max_points}, Due: {due_date} {due_time}",
+        "details": (
+            f"Create assignment '{title}' in course {course_id}\n"
+            f"Max points: {max_points}, Due: {due_date} {due_time}\n\n"
+            f"Description:\n{description}"
+        ),
     })
     if not confirmed:
         return "Assignment creation cancelled."
@@ -242,7 +244,10 @@ def create_material(
     """Post study materials (Drive files, YouTube, links) to a course. Requires confirmation."""
     confirmed = interrupt({
         "action": "create_material",
-        "details": f"Post material '{title}' to course {course_id}",
+        "details": (
+            f"Post material '{title}' to course {course_id}\n\n"
+            f"Description:\n{description}"
+        ),
     })
     if not confirmed:
         return "Material posting cancelled."

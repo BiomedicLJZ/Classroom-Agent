@@ -35,6 +35,10 @@ class TestBuildAgent:
         assert "detailed thinking" not in SYSTEM_PROMPT.lower()
         assert "detailed thinking" not in _GRADING_SUBAGENT_PROMPT.lower()
 
+    def test_system_prompt_has_rewrite_protocol(self):
+        from ta.agent import SYSTEM_PROMPT
+        assert "REWRITE PROTOCOL" in SYSTEM_PROMPT
+
     def test_all_tools_registered(self):
         from ta.tools import ALL_TOOLS
         names = [t.name for t in ALL_TOOLS]
