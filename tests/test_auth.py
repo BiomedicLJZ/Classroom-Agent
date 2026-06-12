@@ -41,6 +41,12 @@ class TestSettings:
         assert settings.nvidia_enable_thinking is False
 
 
+class TestScopes:
+    def test_scopes_include_topics_and_materials(self):
+        assert "https://www.googleapis.com/auth/classroom.topics" in SCOPES
+        assert "https://www.googleapis.com/auth/classroom.courseworkmaterials" in SCOPES
+
+
 class TestGetCredentials:
     def _mock_settings(self, mock_settings_cls, secret_path: str, token_path: str):
         mock_account = MagicMock()
