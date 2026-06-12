@@ -13,7 +13,7 @@ from langgraph.types import interrupt
 from ta.config import Settings
 from ta.session import get_active_account
 
-GRADING_SYSTEM_PROMPT = """detailed thinking off
+GRADING_SYSTEM_PROMPT = """\
 You are an expert teaching assistant grading student submissions.
 Evaluate the submission against the provided rubric criteria.
 Return ONLY valid JSON with this exact schema:
@@ -30,7 +30,15 @@ Do not include any text outside the JSON object."""
 @lru_cache(maxsize=1)
 def _get_llm():
     settings = Settings()
-    return ChatNVIDIA(model=settings.nvidia_model, api_key=settings.nvidia_api_key)
+    return ChatNVIDIA(
+        model=settings.nvidia_model,
+        api_key=settings.nvidia_api_key,
+        temperature=settings.nvidia_temperature,
+        top_p=settings.nvidia_top_p,
+        max_tokens=settings.nvidia_max_tokens,
+        reasoning_budget=settings.nvidia_reasoning_budget,
+        chat_template_kwargs={"enable_thinking": settings.nvidia_enable_thinking},
+    )
 
 
 def _extract_json(text: str) -> str:
@@ -38,6 +46,17 @@ def _extract_json(text: str) -> str:
     text = re.sub(r"<think>[\s\S]*?</think>", "", text, flags=re.IGNORECASE).strip()
     match = re.search(r"```(?:json)?\s*([\s\S]+?)```", text)
     return match.group(1).strip() if match else text.strip()
+
+
+def _as_text(content) -> str:
+    """Normalize LLM content to a string — newer providers may return content blocks."""
+    if isinstance(content, list):
+        return "".join(
+            block.get("text", "")
+            for block in content
+            if isinstance(block, dict) and block.get("type") == "text"
+        )
+    return content or ""
 
 
 @tool
@@ -66,7 +85,7 @@ def analyze_submission(submission_text: str, rubric_json: str, assignment_type: 
             "Return only the JSON grade result."
         )),
     ])
-    parsed = json.loads(_extract_json(response.content))
+    parsed = json.loads(_extract_json(_as_text(response.content)))
     return json.dumps(parsed, indent=2)
 
 
