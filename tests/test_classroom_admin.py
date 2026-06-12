@@ -50,3 +50,78 @@ class TestFullTextConfirmations:
                 drive_file_ids=[], youtube_urls=[], link_urls=[],
             )
         assert "MATERIAL_DESC_BODY" in captured[0]["details"]
+
+
+class TestUpdateAssignment:
+    def test_patches_only_provided_fields(self):
+        svc = _service_mock()
+        patch_call = svc.courses().courseWork().patch
+        patch_call().execute.return_value = {"id": "w1"}
+        with patch("ta.tools.classroom.interrupt", return_value=True), \
+             patch("ta.tools.classroom._classroom_service", return_value=svc):
+            from ta.tools.classroom import update_assignment
+            result = update_assignment.func(
+                course_id="c1", coursework_id="w1", title="New title", max_points=50.0
+            )
+        kwargs = patch_call.call_args.kwargs
+        assert kwargs["updateMask"] == "title,maxPoints"
+        assert kwargs["body"] == {"title": "New title", "maxPoints": 50.0}
+        assert "updated" in result
+
+    def test_due_date_and_topic(self):
+        svc = _service_mock()
+        patch_call = svc.courses().courseWork().patch
+        patch_call().execute.return_value = {"id": "w1"}
+        with patch("ta.tools.classroom.interrupt", return_value=True), \
+             patch("ta.tools.classroom._classroom_service", return_value=svc):
+            from ta.tools.classroom import update_assignment
+            update_assignment.func(
+                course_id="c1", coursework_id="w1",
+                due_date="2026-07-01", due_time="23:59", topic_id="topic9",
+            )
+        kwargs = patch_call.call_args.kwargs
+        assert kwargs["updateMask"] == "dueDate,dueTime,topicId"
+        assert kwargs["body"]["dueDate"] == {"year": 2026, "month": 7, "day": 1}
+        assert kwargs["body"]["dueTime"] == {"hours": 23, "minutes": 59}
+        assert kwargs["body"]["topicId"] == "topic9"
+
+    def test_no_fields_returns_message_without_interrupt(self):
+        with patch("ta.tools.classroom.interrupt") as mock_intr, \
+             patch("ta.tools.classroom._classroom_service"):
+            from ta.tools.classroom import update_assignment
+            result = update_assignment.func(course_id="c1", coursework_id="w1")
+        assert "Nothing to update" in result
+        mock_intr.assert_not_called()
+
+    def test_cancelled_does_not_patch(self):
+        svc = _service_mock()
+        with patch("ta.tools.classroom.interrupt", return_value=False), \
+             patch("ta.tools.classroom._classroom_service", return_value=svc):
+            from ta.tools.classroom import update_assignment
+            result = update_assignment.func(
+                course_id="c1", coursework_id="w1", title="X"
+            )
+        assert "cancelled" in result.lower()
+        svc.courses().courseWork().patch.assert_not_called()
+
+
+class TestDeleteAssignment:
+    def test_deletes_after_confirmation(self):
+        svc = _service_mock()
+        with patch("ta.tools.classroom.interrupt", return_value=True), \
+             patch("ta.tools.classroom._classroom_service", return_value=svc):
+            from ta.tools.classroom import delete_assignment
+            result = delete_assignment.func(course_id="c1", coursework_id="w1")
+        svc.courses().courseWork().delete.assert_called_once_with(
+            courseId="c1", id="w1"
+        )
+        assert "deleted" in result
+
+    def test_cancelled_does_not_delete(self):
+        svc = _service_mock()
+        with patch("ta.tools.classroom.interrupt", return_value=False), \
+             patch("ta.tools.classroom._classroom_service", return_value=svc):
+            from ta.tools.classroom import delete_assignment
+            result = delete_assignment.func(course_id="c1", coursework_id="w1")
+        assert "cancelled" in result.lower()
+        svc.courses().courseWork().delete.assert_not_called()

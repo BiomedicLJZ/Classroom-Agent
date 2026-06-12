@@ -273,3 +273,83 @@ def create_material(
     except HttpError as exc:
         return _http_error_msg(exc, course_id=course_id)
     return f"Material posted (id: {result['id']})."
+
+
+@tool
+def update_assignment(
+    course_id: str,
+    coursework_id: str,
+    title: str = "",
+    description: str = "",
+    due_date: str = "",
+    due_time: str = "",
+    max_points: float = -1,
+    state: str = "",
+    topic_id: str = "",
+) -> str:
+    """Update fields of an existing assignment. Only provided (non-empty) fields change.
+    due_date: YYYY-MM-DD. due_time: HH:MM (24h). state: PUBLISHED or DRAFT.
+    topic_id: assign the coursework to a topic (see list_topics). Requires confirmation."""
+    body: dict = {}
+    mask: list[str] = []
+    if title:
+        body["title"] = title
+        mask.append("title")
+    if description:
+        body["description"] = description
+        mask.append("description")
+    if due_date:
+        year, month, day = map(int, due_date.split("-"))
+        body["dueDate"] = {"year": year, "month": month, "day": day}
+        mask.append("dueDate")
+    if due_time:
+        hour, minute = map(int, due_time.split(":"))
+        body["dueTime"] = {"hours": hour, "minutes": minute}
+        mask.append("dueTime")
+    if max_points >= 0:
+        body["maxPoints"] = max_points
+        mask.append("maxPoints")
+    if state:
+        body["state"] = state.upper()
+        mask.append("state")
+    if topic_id:
+        body["topicId"] = topic_id
+        mask.append("topicId")
+    if not mask:
+        return "Nothing to update — provide at least one field."
+    details = f"Update assignment {coursework_id} in course {course_id}\nFields: {', '.join(mask)}"
+    if description:
+        details += f"\n\nNew description:\n{description}"
+    confirmed = interrupt({"action": "update_assignment", "details": details})
+    if not confirmed:
+        return "Assignment update cancelled."
+    svc = _classroom_service(get_active_account())
+    try:
+        result = (
+            svc.courses().courseWork()
+            .patch(
+                courseId=course_id, id=coursework_id,
+                updateMask=",".join(mask), body=body,
+            )
+            .execute()
+        )
+    except HttpError as exc:
+        return _http_error_msg(exc, course_id=course_id, resource=f"assignment {coursework_id}")
+    return f"Assignment {result['id']} updated ({', '.join(mask)})."
+
+
+@tool
+def delete_assignment(course_id: str, coursework_id: str) -> str:
+    """Permanently delete an assignment and its submissions. Requires confirmation."""
+    confirmed = interrupt({
+        "action": "delete_assignment",
+        "details": f"PERMANENTLY delete assignment {coursework_id} from course {course_id}",
+    })
+    if not confirmed:
+        return "Assignment deletion cancelled."
+    svc = _classroom_service(get_active_account())
+    try:
+        svc.courses().courseWork().delete(courseId=course_id, id=coursework_id).execute()
+    except HttpError as exc:
+        return _http_error_msg(exc, course_id=course_id, resource=f"assignment {coursework_id}")
+    return f"Assignment {coursework_id} deleted."
