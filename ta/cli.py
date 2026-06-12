@@ -1,38 +1,154 @@
 # ta/cli.py
-from langchain_core.messages import HumanMessage
+from langchain_core.messages import AIMessageChunk, HumanMessage
 from langgraph.types import Command
 from rich.console import Console
 from rich.panel import Panel
-from rich.text import Text
 
 console = Console()
 
-
-def _print_ai(content: str) -> None:
-    console.print(Panel(
-        Text(content, style="white"),
-        title="[bold blue]TA Agent[/bold blue]",
-        border_style="blue",
-    ))
+# Node names of the main deep-agent loop; anything else (subagents, tool-internal
+# LLM calls) gets a visible [node] tag so the instructor knows who is talking.
+_MAIN_NODES = {"agent", "model"}
 
 
-def _print_chunk(chunk: dict) -> None:
-    for node_name, node_update in chunk.items():
+def _chunk_reasoning(chunk: AIMessageChunk) -> str:
+    """Raw reasoning tokens. NVIDIA NIM puts them in additional_kwargs
+    ['reasoning_content']; some versions emit typed content blocks instead."""
+    reasoning = chunk.additional_kwargs.get("reasoning_content")
+    if isinstance(reasoning, str) and reasoning:
+        return reasoning
+    if isinstance(chunk.content, list):
+        return "".join(
+            block.get("reasoning_content") or block.get("reasoning") or ""
+            for block in chunk.content
+            if isinstance(block, dict) and "reasoning" in str(block.get("type", ""))
+        )
+    return ""
+
+
+def _chunk_text(chunk: AIMessageChunk) -> str:
+    if isinstance(chunk.content, str):
+        return chunk.content
+    if isinstance(chunk.content, list):
+        return "".join(
+            block.get("text", "")
+            for block in chunk.content
+            if isinstance(block, dict) and block.get("type") == "text"
+        )
+    return ""
+
+
+class StreamRenderer:
+    """Live token display: raw thinking in dim grey first, answer plain after."""
+
+    def __init__(self) -> None:
+        self.section: str | None = None  # None | "thinking" | "answer"
+        self.streamed_answer = False  # any answer tokens shown this turn
+
+    def on_chunk(self, chunk: AIMessageChunk, metadata: dict | None) -> None:
+        if not isinstance(chunk, AIMessageChunk):
+            return
+        node = (metadata or {}).get("langgraph_node", "")
+        tag = "" if node in _MAIN_NODES else f"[{node}] "
+        reasoning = _chunk_reasoning(chunk)
+        if reasoning:
+            self._enter_section("thinking", f"🧠 {tag}thinking", "bold magenta")
+            console.print(
+                reasoning, style="grey50 italic", end="",
+                soft_wrap=True, markup=False, highlight=False,
+            )
+        text = _chunk_text(chunk)
+        if text:
+            self._enter_section("answer", f"💬 {tag}TA Agent", "bold blue")
+            self.streamed_answer = True
+            console.print(text, end="", soft_wrap=True, markup=False, highlight=False)
+
+    def _enter_section(self, name: str, header: str, style: str) -> None:
+        if self.section == name:
+            return
+        if self.section is not None:
+            console.print()  # close the in-progress streamed line
+        console.print(f"\n{header}", style=style, markup=False)
+        self.section = name
+
+    def finish(self) -> None:
+        """Close any open stream section — call before prompts, notices, errors."""
+        if self.section is not None:
+            console.print()
+        self.section = None
+
+
+def _handle_update(payload: dict, renderer: StreamRenderer) -> None:
+    """Updates channel: tool-call notices + fallback for non-streamed AI text."""
+    for node_name, node_update in payload.items():
         if node_name.startswith("__") or not isinstance(node_update, dict):
             continue
         for msg in node_update.get("messages", []):
-            content = getattr(msg, "content", None)
             msg_type = getattr(msg, "type", None) or getattr(msg, "role", None)
-            is_ai = msg_type in ("ai", "assistant")
-            if is_ai and content and isinstance(content, str) and content.strip():
-                _print_ai(content)
+            if msg_type not in ("ai", "assistant"):
+                continue
+            tool_calls = getattr(msg, "tool_calls", None) or []
+            for tc in tool_calls:
+                renderer.finish()
+                console.print(f"⚙ {tc.get('name', '?')}...", style="dim", markup=False)
+            content = getattr(msg, "content", None)
+            if (
+                not tool_calls
+                and not renderer.streamed_answer
+                and isinstance(content, str)
+                and content.strip()
+            ):
+                renderer.finish()
+                console.print(content, markup=False, highlight=False)
+
+
+def _prompt_confirmations(interrupts) -> dict:
+    """Collect y/N decisions for one or more pending interrupts."""
+    resume_values: dict = {}
+    if len(interrupts) == 1:
+        intr = interrupts[0]
+        data = intr.value
+        console.print("\n[bold yellow]⚠ CONFIRMATION REQUIRED[/bold yellow]")
+        console.print(f"[yellow]Action:[/yellow] {data.get('action', '')}")
+        console.print("[yellow]Details:[/yellow]")
+        console.print(data.get("details", ""), markup=False, highlight=False)
+        confirmed = input("\nProceed? [y/N]: ").strip().lower() == "y"
+        resume_values = {intr.id: confirmed}
+    else:
+        console.print(
+            f"\n[bold yellow]⚠ {len(interrupts)} CONFIRMATIONS REQUIRED[/bold yellow]"
+        )
+        for i, intr in enumerate(interrupts, 1):
+            d = intr.value
+            console.print(
+                f"  {i}. {d.get('action', '')} — {str(d.get('details', ''))[:80]}",
+                markup=False, highlight=False,
+            )
+        choice = input(
+            f"\nConfirm all {len(interrupts)}? "
+            "[y=all / n=cancel all / one=one-by-one]: "
+        ).strip().lower()
+        if choice == "y":
+            resume_values = {intr.id: True for intr in interrupts}
+        elif choice == "one":
+            for intr in interrupts:
+                d = intr.value
+                console.print(f"\nAction: {d.get('action', '')}", markup=False)
+                console.print("Details:", markup=False)
+                console.print(str(d.get("details", "")), markup=False, highlight=False)
+                ok = input("Proceed? [y/N]: ").strip().lower() == "y"
+                resume_values[intr.id] = ok
+        else:
+            resume_values = {intr.id: False for intr in interrupts}
+    return resume_values
 
 
 def run_repl(graph, config: dict) -> None:
     """Run the interactive CLI REPL for the TA agent."""
     console.print(Panel(
         "[bold green]Classroom TA Agent[/bold green] ready.\n"
-        "Type your request and press Enter. Type [bold]exit[/bold] to quit.\n\n"
+        "Type your request and press Enter. Type [bold]exit[/bold] to quit.\n"
+        "Raw model reasoning streams in grey before each answer.\n\n"
         "[dim]Examples:[/dim]\n"
         "  List my courses\n"
         "  Grade all submissions for assignment 987 using rubric rubrics/hw1.yaml\n"
@@ -53,61 +169,32 @@ def run_repl(graph, config: dict) -> None:
             console.print("[dim]Goodbye.[/dim]")
             break
 
+        renderer = StreamRenderer()
         try:
-            # stream_input starts as the user message; becomes Command(resume=...) after each
-            # interrupt so we can handle multiple consecutive confirmations in one turn.
+            # stream_input starts as the user message; becomes Command(resume=...)
+            # after each interrupt so consecutive confirmations work in one turn.
             stream_input: dict | Command = {
                 "messages": [HumanMessage(content=user_input)]
             }
             while True:
                 got_interrupt = False
-                for chunk in graph.stream(stream_input, config, stream_mode="updates"):
-                    if "__interrupt__" in chunk:
+                for mode, payload in graph.stream(
+                    stream_input, config, stream_mode=["messages", "updates"]
+                ):
+                    if mode == "messages":
+                        chunk, metadata = payload
+                        renderer.on_chunk(chunk, metadata)
+                        continue
+                    if "__interrupt__" in payload:
+                        renderer.finish()
                         got_interrupt = True
-                        interrupts = chunk["__interrupt__"]
-                        resume_values: dict = {}
-                        if len(interrupts) == 1:
-                            intr = interrupts[0]
-                            data = intr.value
-                            console.print("\n[bold yellow]⚠ CONFIRMATION REQUIRED[/bold yellow]")
-                            console.print(f"[yellow]Action:[/yellow] {data.get('action', '')}")
-                            console.print(f"[yellow]Details:[/yellow]\n{data.get('details', '')}")
-                            confirmed = input("\nProceed? [y/N]: ").strip().lower() == "y"
-                            resume_values = {intr.id: confirmed}
-                        else:
-                            console.print(
-                                f"\n[bold yellow]⚠ {len(interrupts)} CONFIRMATIONS REQUIRED[/bold yellow]"
-                            )
-                            for i, intr in enumerate(interrupts, 1):
-                                d = intr.value
-                                console.print(
-                                    f"  [dim]{i}.[/dim] [yellow]{d.get('action', '')}[/yellow] — "
-                                    f"{d.get('details', '')[:80]}"
-                                )
-                            choice = input(
-                                f"\nConfirm all {len(interrupts)}? "
-                                "[y=all / n=cancel all / one=one-by-one]: "
-                            ).strip().lower()
-                            if choice == "y":
-                                resume_values = {intr.id: True for intr in interrupts}
-                            elif choice == "one":
-                                for intr in interrupts:
-                                    d = intr.value
-                                    console.print(
-                                        f"\n[yellow]Action:[/yellow] {d.get('action', '')}"
-                                    )
-                                    console.print(
-                                        f"[yellow]Details:[/yellow] {d.get('details', '')}"
-                                    )
-                                    ok = input("Proceed? [y/N]: ").strip().lower() == "y"
-                                    resume_values[intr.id] = ok
-                            else:
-                                resume_values = {intr.id: False for intr in interrupts}
+                        resume_values = _prompt_confirmations(payload["__interrupt__"])
                         stream_input = Command(resume=resume_values)
                         break  # close the paused generator; restart with Command
-                    else:
-                        _print_chunk(chunk)
+                    _handle_update(payload, renderer)
                 if not got_interrupt:
                     break  # no interrupt this round — turn is complete
+            renderer.finish()
         except Exception as exc:
+            renderer.finish()
             console.print(f"[bold red]Error:[/bold red] {exc}")
