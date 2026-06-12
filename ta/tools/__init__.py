@@ -3,15 +3,25 @@ from ta.tools.accounts import list_accounts, switch_account
 from ta.tools.classroom import (
     create_assignment,
     create_material,
+    create_topic,
+    delete_announcement,
+    delete_assignment,
     delete_invitation,
+    delete_material,
     get_submission,
     get_submission_status,
     invite_user,
+    list_announcements,
     list_assignments,
     list_courses,
     list_invitations,
+    list_materials,
     list_students,
+    list_topics,
     post_announcement,
+    update_announcement,
+    update_assignment,
+    update_material,
 )
 from ta.tools.docs import add_doc_comment, get_doc_text
 from ta.tools.drive import get_drive_file_text, upload_file_to_drive
@@ -30,6 +40,7 @@ from ta.tools.office import (
 from ta.tools.grading import (
     analyze_submission,
     batch_grade_assignment,
+    export_grades,
     load_rubric,
     post_grade,
     post_private_comment,
@@ -51,6 +62,17 @@ ALL_TOOLS = [
     create_material,
     invite_user,
     delete_invitation,
+    # Classroom — admin (rework)
+    update_assignment,
+    delete_assignment,
+    list_announcements,
+    update_announcement,
+    delete_announcement,
+    list_materials,
+    update_material,
+    delete_material,
+    list_topics,
+    create_topic,
     # Classroom — invitations (read)
     list_invitations,
     # Grading
@@ -59,6 +81,7 @@ ALL_TOOLS = [
     batch_grade_assignment,
     post_grade,
     post_private_comment,
+    export_grades,
     # Drive
     get_drive_file_text,
     upload_file_to_drive,
