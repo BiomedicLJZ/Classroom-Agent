@@ -17,12 +17,15 @@ def _print_ai(content: str) -> None:
 
 
 def _print_chunk(chunk: dict) -> None:
-    for msg in chunk.get("messages", []):
-        content = getattr(msg, "content", None)
-        msg_type = getattr(msg, "type", None) or getattr(msg, "role", None)
-        is_ai = msg_type in ("ai", "assistant")
-        if is_ai and content and isinstance(content, str) and content.strip():
-            _print_ai(content)
+    for node_name, node_update in chunk.items():
+        if node_name.startswith("__") or not isinstance(node_update, dict):
+            continue
+        for msg in node_update.get("messages", []):
+            content = getattr(msg, "content", None)
+            msg_type = getattr(msg, "type", None) or getattr(msg, "role", None)
+            is_ai = msg_type in ("ai", "assistant")
+            if is_ai and content and isinstance(content, str) and content.strip():
+                _print_ai(content)
 
 
 def run_repl(graph, config: dict) -> None:
@@ -58,15 +61,49 @@ def run_repl(graph, config: dict) -> None:
             }
             while True:
                 got_interrupt = False
-                for chunk in graph.stream(stream_input, config, stream_mode="values"):
+                for chunk in graph.stream(stream_input, config, stream_mode="updates"):
                     if "__interrupt__" in chunk:
                         got_interrupt = True
-                        data = chunk["__interrupt__"][0].value
-                        console.print("\n[bold yellow]⚠ CONFIRMATION REQUIRED[/bold yellow]")
-                        console.print(f"[yellow]Action:[/yellow] {data.get('action', '')}")
-                        console.print(f"[yellow]Details:[/yellow]\n{data.get('details', '')}")
-                        confirmed = input("\nProceed? [y/N]: ").strip().lower() == "y"
-                        stream_input = Command(resume=confirmed)
+                        interrupts = chunk["__interrupt__"]
+                        resume_values: dict = {}
+                        if len(interrupts) == 1:
+                            intr = interrupts[0]
+                            data = intr.value
+                            console.print("\n[bold yellow]⚠ CONFIRMATION REQUIRED[/bold yellow]")
+                            console.print(f"[yellow]Action:[/yellow] {data.get('action', '')}")
+                            console.print(f"[yellow]Details:[/yellow]\n{data.get('details', '')}")
+                            confirmed = input("\nProceed? [y/N]: ").strip().lower() == "y"
+                            resume_values = {intr.id: confirmed}
+                        else:
+                            console.print(
+                                f"\n[bold yellow]⚠ {len(interrupts)} CONFIRMATIONS REQUIRED[/bold yellow]"
+                            )
+                            for i, intr in enumerate(interrupts, 1):
+                                d = intr.value
+                                console.print(
+                                    f"  [dim]{i}.[/dim] [yellow]{d.get('action', '')}[/yellow] — "
+                                    f"{d.get('details', '')[:80]}"
+                                )
+                            choice = input(
+                                f"\nConfirm all {len(interrupts)}? "
+                                "[y=all / n=cancel all / one=one-by-one]: "
+                            ).strip().lower()
+                            if choice == "y":
+                                resume_values = {intr.id: True for intr in interrupts}
+                            elif choice == "one":
+                                for intr in interrupts:
+                                    d = intr.value
+                                    console.print(
+                                        f"\n[yellow]Action:[/yellow] {d.get('action', '')}"
+                                    )
+                                    console.print(
+                                        f"[yellow]Details:[/yellow] {d.get('details', '')}"
+                                    )
+                                    ok = input("Proceed? [y/N]: ").strip().lower() == "y"
+                                    resume_values[intr.id] = ok
+                            else:
+                                resume_values = {intr.id: False for intr in interrupts}
+                        stream_input = Command(resume=resume_values)
                         break  # close the paused generator; restart with Command
                     else:
                         _print_chunk(chunk)

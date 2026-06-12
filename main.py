@@ -9,7 +9,7 @@ from ta.google_auth import get_credentials
 
 def main() -> None:
     settings = Settings()
-    get_credentials(settings.google_client_secret_path, settings.google_token_path)
+    get_credentials("cugdl")
     graph = build_agent(settings)
     run_repl(graph, {"configurable": {"thread_id": str(uuid.uuid4())}})
 

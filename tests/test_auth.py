@@ -25,6 +25,12 @@ class TestSettings:
 
 
 class TestGetCredentials:
+    def _mock_settings(self, mock_settings_cls, secret_path: str, token_path: str):
+        mock_account = MagicMock()
+        mock_account.client_secret_path = secret_path
+        mock_account.token_path = token_path
+        mock_settings_cls.return_value.accounts = {"cugdl": mock_account, "uniat": MagicMock()}
+
     def test_loads_from_existing_valid_token(self, tmp_path):
         token_data = {
             "token": "ya29.fake",
@@ -40,8 +46,12 @@ class TestGetCredentials:
         mock_creds = MagicMock()
         mock_creds.valid = True
 
-        with patch("ta.google_auth.Credentials.from_authorized_user_file", return_value=mock_creds):
-            creds = get_credentials("fake_secret.json", str(token_file))
+        with (
+            patch("ta.google_auth.Settings") as mock_settings_cls,
+            patch("ta.google_auth.Credentials.from_authorized_user_file", return_value=mock_creds),
+        ):
+            self._mock_settings(mock_settings_cls, "fake_secret.json", str(token_file))
+            creds = get_credentials("cugdl")
 
         assert creds is mock_creds
 
@@ -56,8 +66,10 @@ class TestGetCredentials:
         mock_creds.to_json.return_value = "{}"
 
         with (
+            patch("ta.google_auth.Settings") as mock_settings_cls,
             patch("ta.google_auth.Credentials.from_authorized_user_file", return_value=mock_creds),
             patch("ta.google_auth.Request") as mock_request,
         ):
-            get_credentials("fake_secret.json", str(token_file))
+            self._mock_settings(mock_settings_cls, "fake_secret.json", str(token_file))
+            get_credentials("cugdl")
             mock_creds.refresh.assert_called_once_with(mock_request())

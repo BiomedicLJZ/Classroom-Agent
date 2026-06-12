@@ -5,21 +5,20 @@ from googleapiclient.discovery import build
 from langchain_core.tools import tool
 from langgraph.types import interrupt
 
-from ta.config import Settings
 from ta.google_auth import get_credentials
+from ta.session import get_active_account
 
 
-@lru_cache(maxsize=1)
-def _docs_service():
-    settings = Settings()
-    creds = get_credentials(settings.google_client_secret_path, settings.google_token_path)
+@lru_cache(maxsize=None)
+def _docs_service(alias: str):
+    creds = get_credentials(alias)
     return build("docs", "v1", credentials=creds)
 
 
 @tool
 def get_doc_text(document_id: str) -> str:
     """Return the full plain text content of a Google Docs document."""
-    svc = _docs_service()
+    svc = _docs_service(get_active_account())
     doc = svc.documents().get(documentId=document_id).execute()
     texts = []
     for element in doc.get("body", {}).get("content", []):
@@ -44,7 +43,7 @@ def add_doc_comment(document_id: str, anchor_text: str, comment_text: str) -> st
     if not confirmed:
         return "Comment cancelled."
 
-    svc = _docs_service()
+    svc = _docs_service(get_active_account())
     doc = svc.documents().get(documentId=document_id).execute()
     char_offset = 0
     anchor_start = None
@@ -62,7 +61,7 @@ def add_doc_comment(document_id: str, anchor_text: str, comment_text: str) -> st
         return f"Anchor text '{anchor_text[:40]}' not found in document. Comment not added."
 
     from ta.tools.drive import _drive_service
-    drive_svc = _drive_service()
+    drive_svc = _drive_service(get_active_account())
     anchor_end = anchor_start + len(anchor_text)
     try:
         result = drive_svc.comments().create(

@@ -4,11 +4,15 @@ from unittest.mock import MagicMock, patch
 
 class TestBuildAgent:
     def test_compiles_successfully(self):
-        with patch("ta.agent.ChatNVIDIA") as mock_llm_cls:
+        with patch("ta.agent.ChatNVIDIA") as mock_llm_cls, \
+             patch("ta.agent.create_deep_agent") as mock_create:
             mock_llm_cls.return_value = MagicMock()
+            mock_create.return_value = MagicMock()
             from ta.agent import build_agent
             from ta.config import Settings
-            assert build_agent(Settings()) is not None
+            result = build_agent(Settings())
+            assert result is not None
+            mock_create.assert_called_once()
 
     def test_all_tools_registered(self):
         from ta.tools import ALL_TOOLS

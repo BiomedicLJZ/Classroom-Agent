@@ -15,7 +15,7 @@ class TestRunRepl:
 
     def test_sends_user_message_to_graph(self):
         mock_graph = MagicMock()
-        mock_graph.stream.return_value = iter([{"messages": [AIMessage(content="Courses listed!")]}])  # noqa: E501
+        mock_graph.stream.return_value = iter([{"agent": {"messages": [AIMessage(content="Courses listed!")]}}])
         with patch("builtins.input", side_effect=["list courses", "exit"]):
             from ta.cli import run_repl
             run_repl(mock_graph, {"configurable": {"thread_id": "t"}})
@@ -25,24 +25,28 @@ class TestRunRepl:
     def test_interrupt_yes_resumes_with_true(self):
         mock_graph = MagicMock()
         interrupt_chunk = {
-            "__interrupt__": [MagicMock(value={"action": "post_announcement", "details": "Post?"})]
+            "__interrupt__": [MagicMock(
+                value={"action": "post_announcement", "details": "Post?"}, id="intr-1"
+            )]
         }
-        resume_chunk = {"messages": [AIMessage(content="Posted.")]}
+        resume_chunk = {"agent": {"messages": [AIMessage(content="Posted.")]}}
         mock_graph.stream.side_effect = [iter([interrupt_chunk]), iter([resume_chunk])]
         with patch("builtins.input", side_effect=["post it", "y", "exit"]):
             from ta.cli import run_repl
             run_repl(mock_graph, {"configurable": {"thread_id": "t"}})
         cmd = mock_graph.stream.call_args_list[1][0][0]
-        assert isinstance(cmd, Command) and cmd.resume is True
+        assert isinstance(cmd, Command) and cmd.resume == {"intr-1": True}
 
     def test_interrupt_no_resumes_with_false(self):
         mock_graph = MagicMock()
         mock_graph.stream.side_effect = [
-            iter([{"__interrupt__": [MagicMock(value={"action": "post_grade", "details": "Post?"})]}]),  # noqa: E501
-            iter([{"messages": [AIMessage(content="Cancelled.")]}]),
+            iter([{"__interrupt__": [MagicMock(
+                value={"action": "post_grade", "details": "Post?"}, id="intr-2"
+            )]}]),
+            iter([{"agent": {"messages": [AIMessage(content="Cancelled.")]}}]),
         ]
         with patch("builtins.input", side_effect=["grade", "n", "exit"]):
             from ta.cli import run_repl
             run_repl(mock_graph, {"configurable": {"thread_id": "t"}})
         cmd = mock_graph.stream.call_args_list[1][0][0]
-        assert isinstance(cmd, Command) and cmd.resume is False
+        assert isinstance(cmd, Command) and cmd.resume == {"intr-2": False}

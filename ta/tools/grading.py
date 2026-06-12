@@ -11,8 +11,10 @@ from langchain_nvidia_ai_endpoints import ChatNVIDIA
 from langgraph.types import interrupt
 
 from ta.config import Settings
+from ta.session import get_active_account
 
-GRADING_SYSTEM_PROMPT = """You are an expert teaching assistant grading student submissions.
+GRADING_SYSTEM_PROMPT = """detailed thinking off
+You are an expert teaching assistant grading student submissions.
 Evaluate the submission against the provided rubric criteria.
 Return ONLY valid JSON with this exact schema:
 {
@@ -32,7 +34,8 @@ def _get_llm():
 
 
 def _extract_json(text: str) -> str:
-    """Strip markdown code fences from LLM output."""
+    """Strip <think> blocks and markdown code fences from LLM output."""
+    text = re.sub(r"<think>[\s\S]*?</think>", "", text, flags=re.IGNORECASE).strip()
     match = re.search(r"```(?:json)?\s*([\s\S]+?)```", text)
     return match.group(1).strip() if match else text.strip()
 
@@ -87,8 +90,7 @@ def post_grade(
     from googleapiclient.discovery import build
 
     from ta.google_auth import get_credentials
-    settings = Settings()
-    creds = get_credentials(settings.google_client_secret_path, settings.google_token_path)
+    creds = get_credentials(get_active_account())
     svc = build("classroom", "v1", credentials=creds)
 
     subs = (
@@ -122,8 +124,7 @@ def post_private_comment(
     from googleapiclient.discovery import build
 
     from ta.google_auth import get_credentials
-    settings = Settings()
-    creds = get_credentials(settings.google_client_secret_path, settings.google_token_path)
+    creds = get_credentials(get_active_account())
     svc = build("classroom", "v1", credentials=creds)
     svc.courses().courseWork().studentSubmissions().modifyAttachments(
         courseId=course_id, courseWorkId=coursework_id, id=submission_id,
@@ -146,7 +147,7 @@ def batch_grade_assignment(
     if rubric_json.startswith("Error"):
         return rubric_json
 
-    svc = _classroom_service()
+    svc = _classroom_service(get_active_account())
     subs_response = (
         svc.courses().courseWork().studentSubmissions()
         .list(courseId=course_id, courseWorkId=coursework_id)

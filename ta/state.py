@@ -1,11 +1,9 @@
 # ta/state.py
 from __future__ import annotations
 
-from typing import Annotated, Any, NotRequired
+from typing import Any, NotRequired
 
-from langchain_core.messages import BaseMessage
-from langgraph.graph.message import add_messages
-from langgraph.managed.is_last_step import RemainingStepsManager
+from deepagents import DeepAgentState
 from typing_extensions import TypedDict
 
 
@@ -26,25 +24,19 @@ class GradeResult(TypedDict):
     inline_comments: list[dict]
 
 
-class TAState(TypedDict):
-    # Conversation history — append-only via add_messages reducer
-    messages: Annotated[list[BaseMessage], add_messages]
-
+class TAState(DeepAgentState):
     # Session context
-    active_course_id: str | None
-    active_course_name: str | None
-    active_assignment_id: str | None
+    active_course_id: NotRequired[str | None]
+    active_course_name: NotRequired[str | None]
+    active_assignment_id: NotRequired[str | None]
 
     # Grading session — populated by batch_grade_assignment, flushed on post
-    rubric: list[RubricCriteria] | None
-    pending_grades: list[GradeResult]
+    rubric: NotRequired[list[RubricCriteria] | None]
+    pending_grades: NotRequired[list[GradeResult]]
 
     # Scratch space for tool output
-    last_tool_result: Any | None
+    last_tool_result: NotRequired[Any | None]
 
     # Confirmation state — paired with interrupt() in destructive tools
-    awaiting_confirmation: bool
-    confirmation_action: str | None
-
-    # Required by LangGraph create_react_agent for recursion budget tracking
-    remaining_steps: NotRequired[Annotated[int, RemainingStepsManager]]
+    awaiting_confirmation: NotRequired[bool]
+    confirmation_action: NotRequired[str | None]

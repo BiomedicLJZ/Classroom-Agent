@@ -5,6 +5,8 @@ from google.auth.transport.requests import Request
 from google.oauth2.credentials import Credentials
 from google_auth_oauthlib.flow import InstalledAppFlow
 
+from ta.config import Settings
+
 SCOPES = [
     "https://www.googleapis.com/auth/classroom.courses.readonly",
     "https://www.googleapis.com/auth/classroom.coursework.students",
@@ -17,8 +19,19 @@ SCOPES = [
 ]
 
 
-def get_credentials(client_secret_path: str, token_path: str) -> Credentials:
-    """Load OAuth2 credentials, refreshing or triggering browser flow as needed."""
+def get_credentials(alias: str) -> Credentials:
+    """Load OAuth2 credentials for account alias, refreshing or triggering browser
+    flow as needed. alias must match a key in Settings.accounts ('cugdl' or 'uniat')."""
+    settings = Settings()
+    if alias not in settings.accounts:
+        raise ValueError(
+            f"Unknown account alias '{alias}'. "
+            f"Available: {list(settings.accounts.keys())}"
+        )
+    account = settings.accounts[alias]
+    client_secret_path = account.client_secret_path
+    token_path = account.token_path
+
     creds = None
     if Path(token_path).exists():
         creds = Credentials.from_authorized_user_file(token_path, SCOPES)

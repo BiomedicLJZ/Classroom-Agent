@@ -3,24 +3,38 @@ import json
 from functools import lru_cache
 
 from googleapiclient.discovery import build
+from googleapiclient.errors import HttpError
 from langchain_core.tools import tool
 from langgraph.types import interrupt
 
-from ta.config import Settings
 from ta.google_auth import get_credentials
+from ta.session import get_active_account
 
 
-@lru_cache(maxsize=1)
-def _classroom_service():
-    settings = Settings()
-    creds = get_credentials(settings.google_client_secret_path, settings.google_token_path)
+def _http_error_msg(exc: HttpError, course_id: str = "", resource: str = "") -> str:
+    """Return a helpful string for common Classroom API HTTP errors."""
+    status = exc.resp.status
+    if status == 404:
+        target = resource or (f"course {course_id}" if course_id else "resource")
+        return (
+            f"Not found: {target} does not exist or is not accessible with the active account. "
+            "Run list_courses() to confirm the correct course ID and active account."
+        )
+    if status == 403:
+        return "Permission denied. Check that the active account has Teacher/Owner access."
+    return f"Google API error {status}: {exc.reason}"
+
+
+@lru_cache(maxsize=None)
+def _classroom_service(alias: str):
+    creds = get_credentials(alias)
     return build("classroom", "v1", credentials=creds)
 
 
 @tool
 def list_courses() -> str:
     """List all active Google Classroom courses the authenticated user has access to."""
-    svc = _classroom_service()
+    svc = _classroom_service(get_active_account())
     response = svc.courses().list(courseStates=["ACTIVE"]).execute()
     courses = response.get("courses", [])
     if not courses:
@@ -32,7 +46,7 @@ def list_courses() -> str:
 @tool
 def list_students(course_id: str) -> str:
     """List all enrolled students in a Google Classroom course."""
-    svc = _classroom_service()
+    svc = _classroom_service(get_active_account())
     response = svc.courses().students().list(courseId=course_id).execute()
     students = response.get("students", [])
     if not students:
@@ -49,7 +63,7 @@ def list_students(course_id: str) -> str:
 @tool
 def list_assignments(course_id: str) -> str:
     """List all coursework (assignments, quizzes) in a Google Classroom course."""
-    svc = _classroom_service()
+    svc = _classroom_service(get_active_account())
     response = svc.courses().courseWork().list(courseId=course_id).execute()
     items = response.get("courseWork", [])
     if not items:
@@ -65,7 +79,7 @@ def list_assignments(course_id: str) -> str:
 def get_submission_status(course_id: str, coursework_id: str) -> str:
     """Return submission state for every student in an assignment.
     States: NEW, CREATED, TURNED_IN, RETURNED, RECLAIMED_BY_STUDENT."""
-    svc = _classroom_service()
+    svc = _classroom_service(get_active_account())
     response = (
         svc.courses().courseWork().studentSubmissions()
         .list(courseId=course_id, courseWorkId=coursework_id)
@@ -81,7 +95,7 @@ def get_submission_status(course_id: str, coursework_id: str) -> str:
 @tool
 def get_submission(course_id: str, coursework_id: str, submission_id: str) -> str:
     """Fetch a single student submission including attached Drive file IDs."""
-    svc = _classroom_service()
+    svc = _classroom_service(get_active_account())
     sub = (
         svc.courses().courseWork().studentSubmissions()
         .get(courseId=course_id, courseWorkId=coursework_id, id=submission_id)
@@ -111,10 +125,13 @@ def post_announcement(course_id: str, text: str) -> str:
     })
     if not confirmed:
         return "Announcement posting cancelled."
-    svc = _classroom_service()
-    result = svc.courses().announcements().create(
-        courseId=course_id, body={"text": text, "state": "PUBLISHED"}
-    ).execute()
+    svc = _classroom_service(get_active_account())
+    try:
+        result = svc.courses().announcements().create(
+            courseId=course_id, body={"text": text, "state": "PUBLISHED"}
+        ).execute()
+    except HttpError as exc:
+        return _http_error_msg(exc, course_id=course_id)
     return f"Announcement posted (id: {result['id']})."
 
 
@@ -150,9 +167,67 @@ def create_assignment(
             {"driveFile": {"driveFile": {"id": fid}, "shareMode": "VIEW"}}
             for fid in materials_drive_ids
         ]
-    svc = _classroom_service()
-    result = svc.courses().courseWork().create(courseId=course_id, body=body).execute()
+    svc = _classroom_service(get_active_account())
+    try:
+        result = svc.courses().courseWork().create(courseId=course_id, body=body).execute()
+    except HttpError as exc:
+        return _http_error_msg(exc, course_id=course_id)
     return f"Assignment created (id: {result['id']}, title: {result.get('title')})."
+
+
+@tool
+def invite_user(course_id: str, user_email: str, role: str) -> str:
+    """Invite a user to a Google Classroom course. role must be 'STUDENT' or 'TEACHER'.
+    Requires confirmation before sending."""
+    role_upper = role.upper()
+    if role_upper not in ("STUDENT", "TEACHER"):
+        return f"Invalid role '{role}'. Must be STUDENT or TEACHER."
+    confirmed = interrupt({
+        "action": "invite_user",
+        "details": f"Invite {user_email} to course {course_id} as {role_upper}",
+    })
+    if not confirmed:
+        return "Invitation cancelled."
+    svc = _classroom_service(get_active_account())
+    try:
+        result = svc.invitations().create(
+            body={"courseId": course_id, "userId": user_email, "role": role_upper}
+        ).execute()
+    except HttpError as exc:
+        return _http_error_msg(exc, course_id=course_id, resource=f"user {user_email}")
+    return f"Invitation sent (id: {result['id']}) — {user_email} invited as {role_upper}."
+
+
+@tool
+def list_invitations(course_id: str) -> str:
+    """List all pending invitations for a Google Classroom course."""
+    svc = _classroom_service(get_active_account())
+    response = svc.invitations().list(courseId=course_id).execute()
+    invitations = response.get("invitations", [])
+    if not invitations:
+        return f"No pending invitations for course {course_id}."
+    lines = [
+        f"- [{inv['id']}] {inv.get('userId', 'unknown')} as {inv.get('role', 'unknown')}"
+        for inv in invitations
+    ]
+    return f"Pending invitations ({len(lines)}):\n" + "\n".join(lines)
+
+
+@tool
+def delete_invitation(invitation_id: str) -> str:
+    """Cancel and delete a pending Google Classroom invitation by its ID. Requires confirmation."""
+    confirmed = interrupt({
+        "action": "delete_invitation",
+        "details": f"Delete invitation {invitation_id}",
+    })
+    if not confirmed:
+        return "Invitation deletion cancelled."
+    svc = _classroom_service(get_active_account())
+    try:
+        svc.invitations().delete(id=invitation_id).execute()
+    except HttpError as exc:
+        return _http_error_msg(exc, resource=f"invitation {invitation_id}")
+    return f"Invitation {invitation_id} deleted."
 
 
 @tool
@@ -179,14 +254,17 @@ def create_material(
         materials.append({"youtubeVideo": {"id": video_id}})
     for url in link_urls:
         materials.append({"link": {"url": url}})
-    svc = _classroom_service()
-    result = svc.courses().courseWorkMaterials().create(
-        courseId=course_id,
-        body={
-            "title": title,
-            "description": description,
-            "materials": materials,
-            "state": "PUBLISHED",
-        },
-    ).execute()
+    svc = _classroom_service(get_active_account())
+    try:
+        result = svc.courses().courseWorkMaterials().create(
+            courseId=course_id,
+            body={
+                "title": title,
+                "description": description,
+                "materials": materials,
+                "state": "PUBLISHED",
+            },
+        ).execute()
+    except HttpError as exc:
+        return _http_error_msg(exc, course_id=course_id)
     return f"Material posted (id: {result['id']})."
