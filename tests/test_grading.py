@@ -38,6 +38,29 @@ class TestGradingLLM:
             )
         assert '"score": 5.0' in result
 
+    def test_analyze_submission_retries_on_transient_failure(self):
+        import tenacity
+
+        from ta.tools import grading
+        grade_json = (
+            '{"criteria_scores": {}, "score": 1.0, "max_score": 1.0, '
+            '"feedback_text": "x", "inline_comments": []}'
+        )
+        fake_llm = MagicMock()
+        fake_llm.invoke.side_effect = [
+            RuntimeError("429 Too Many Requests"),
+            RuntimeError("timeout"),
+            AIMessage(content=grade_json),
+        ]
+        grading._invoke_llm.retry.wait = tenacity.wait_none()  # no sleeping in tests
+        with patch("ta.tools.grading._get_llm", return_value=fake_llm):
+            from ta.tools.grading import analyze_submission
+            result = analyze_submission.func(
+                submission_text="x", rubric_json="[]", assignment_type="code"
+            )
+        assert '"score": 1.0' in result
+        assert fake_llm.invoke.call_count == 3
+
 
 class TestPostGradeFeedback:
     def _svc_with_submission(self, with_file=True):

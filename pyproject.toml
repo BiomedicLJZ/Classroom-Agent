@@ -27,6 +27,7 @@ dependencies = [
     "notebook>=7.5.6",
     "deepagents>=0.6.8",
     "langgraph-checkpoint-sqlite>=3.1.0",
+    "tenacity>=9.1.4",
 ]
 
 [dependency-groups]

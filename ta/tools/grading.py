@@ -9,6 +9,7 @@ from langchain_core.messages import HumanMessage, SystemMessage
 from langchain_core.tools import tool
 from langchain_nvidia_ai_endpoints import ChatNVIDIA
 from langgraph.types import interrupt
+from tenacity import retry, stop_after_attempt, wait_exponential
 
 from ta.config import Settings
 from ta.session import get_active_account
@@ -39,6 +40,12 @@ def _get_llm():
         reasoning_budget=settings.nvidia_reasoning_budget,
         chat_template_kwargs={"enable_thinking": settings.nvidia_enable_thinking},
     )
+
+
+@retry(stop=stop_after_attempt(3), wait=wait_exponential(multiplier=2, max=30), reraise=True)
+def _invoke_llm(messages: list):
+    """LLM call with backoff — the free NVIDIA endpoint rate-limits bursts."""
+    return _get_llm().invoke(messages)
 
 
 def _extract_json(text: str) -> str:
@@ -75,8 +82,7 @@ def analyze_submission(submission_text: str, rubric_json: str, assignment_type: 
     """Use the NVIDIA LLM to evaluate a student submission against a rubric.
     assignment_type: 'code' | 'report' | 'documentation' | 'diagram'
     Returns a JSON GradeResult."""
-    llm = _get_llm()
-    response = llm.invoke([
+    response = _invoke_llm([
         SystemMessage(content=GRADING_SYSTEM_PROMPT),
         HumanMessage(content=(
             f"Assignment type: {assignment_type}\n\n"
