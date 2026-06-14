@@ -30,7 +30,7 @@ class TestSettings:
         assert settings.nvidia_top_p == 0.95
         assert settings.nvidia_max_tokens == 16384
         assert settings.nvidia_reasoning_budget == 16384
-        assert settings.nvidia_enable_thinking is True
+        assert settings.nvidia_enable_thinking is False
 
     def test_reasoning_overridable_from_env(self, monkeypatch):
         monkeypatch.setenv("NVIDIA_API_KEY", "nvapi-test")

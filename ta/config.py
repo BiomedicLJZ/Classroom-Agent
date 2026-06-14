@@ -17,7 +17,9 @@ class Settings(BaseSettings):
     nvidia_top_p: float = 0.95
     nvidia_max_tokens: int = 16384
     nvidia_reasoning_budget: int = 16384
-    nvidia_enable_thinking: bool = True
+    # Reasoning is OFF by default — toggle per-session with /think on, or set
+    # NVIDIA_ENABLE_THINKING=true in .env to default it on.
+    nvidia_enable_thinking: bool = False
 
     # CUGDL account (existing)
     google_client_secret_path: str = "credentials/client_secret.json"

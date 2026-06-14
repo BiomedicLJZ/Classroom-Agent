@@ -28,7 +28,7 @@ class TestBuildAgent:
             assert kwargs["top_p"] == 0.95
             assert kwargs["max_tokens"] == 16384
             assert kwargs["reasoning_budget"] == 16384
-            assert kwargs["chat_template_kwargs"] == {"enable_thinking": True}
+            assert kwargs["chat_template_kwargs"] == {"enable_thinking": False}
 
     def test_prompts_have_no_legacy_thinking_toggle(self):
         from ta.agent import _GRADING_SUBAGENT_PROMPT, SYSTEM_PROMPT
