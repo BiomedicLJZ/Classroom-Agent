@@ -1,6 +1,7 @@
 # ta/google_auth.py
 from pathlib import Path
 
+from google.auth.exceptions import RefreshError
 from google.auth.transport.requests import Request
 from google.oauth2.credentials import Credentials
 from google_auth_oauthlib.flow import InstalledAppFlow
@@ -39,9 +40,16 @@ def get_credentials(alias: str) -> Credentials:
         creds = Credentials.from_authorized_user_file(token_path, SCOPES)
 
     if not creds or not creds.valid:
+        refreshed = False
         if creds and creds.expired and creds.refresh_token:
-            creds.refresh(Request())
-        else:
+            try:
+                creds.refresh(Request())
+                refreshed = True
+            except RefreshError:
+                # Token revoked or scopes changed — discard and re-run consent.
+                Path(token_path).unlink(missing_ok=True)
+                creds = None
+        if not refreshed:
             flow = InstalledAppFlow.from_client_secrets_file(client_secret_path, SCOPES)
             creds = flow.run_local_server(port=0)
         Path(token_path).write_text(creds.to_json())

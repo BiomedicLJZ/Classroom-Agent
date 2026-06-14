@@ -78,6 +78,30 @@ class TestGetCredentials:
 
         assert creds is mock_creds
 
+    def test_refresh_error_triggers_browser_flow(self, tmp_path):
+        from google.auth.exceptions import RefreshError
+
+        token_file = tmp_path / "token.json"
+        token_file.write_text("{}")
+
+        stale = MagicMock(valid=False, expired=True, refresh_token="1//x")
+        stale.refresh.side_effect = RefreshError("invalid_grant: revoked")
+        fresh = MagicMock(valid=True)
+        fresh.to_json.return_value = '{"token": "new"}'
+
+        with (
+            patch("ta.google_auth.Settings") as mock_settings_cls,
+            patch("ta.google_auth.Credentials.from_authorized_user_file", return_value=stale),
+            patch("ta.google_auth.Request"),
+            patch("ta.google_auth.InstalledAppFlow") as mock_flow_cls,
+        ):
+            mock_flow_cls.from_client_secrets_file.return_value.run_local_server.return_value = fresh
+            self._mock_settings(mock_settings_cls, "fake_secret.json", str(token_file))
+            creds = get_credentials("cugdl")
+
+        assert creds is fresh
+        assert token_file.read_text() == '{"token": "new"}'
+
     def test_refreshes_expired_token(self, tmp_path):
         token_file = tmp_path / "token.json"
         token_file.write_text("{}")
