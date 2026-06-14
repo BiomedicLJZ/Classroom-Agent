@@ -159,7 +159,7 @@ def batch_grade_assignment(
     """Grade ALL TURNED_IN submissions for an assignment using a YAML rubric.
     Fetches each submission's Drive files and analyzes with NVIDIA LLM.
     Returns a summary table. Grades are NOT posted — call post_grade for each student."""
-    from ta.tools.classroom import _classroom_service
+    from ta.tools.classroom import _classroom_service, _collect_pages
     from ta.tools.drive import get_drive_file_text
 
     rubric_json = load_rubric.invoke({"rubric_path": rubric_path})
@@ -167,15 +167,12 @@ def batch_grade_assignment(
         return rubric_json
 
     svc = _classroom_service(get_active_account())
-    subs_response = (
-        svc.courses().courseWork().studentSubmissions()
-        .list(courseId=course_id, courseWorkId=coursework_id)
-        .execute()
+    all_subs = _collect_pages(
+        lambda tok: svc.courses().courseWork().studentSubmissions()
+        .list(courseId=course_id, courseWorkId=coursework_id, pageToken=tok),
+        "studentSubmissions",
     )
-    turned_in = [
-        s for s in subs_response.get("studentSubmissions", [])
-        if s.get("state") == "TURNED_IN"
-    ]
+    turned_in = [s for s in all_subs if s.get("state") == "TURNED_IN"]
     if not turned_in:
         return "No TURNED_IN submissions found."
 
@@ -218,12 +215,16 @@ def export_grades(course_id: str, output_path: str) -> str:
     column per assignment, cell = assignedGrade (empty when not graded yet)."""
     from openpyxl import Workbook
 
-    from ta.tools.classroom import _classroom_service
+    from ta.tools.classroom import _classroom_service, _collect_pages
 
     svc = _classroom_service(get_active_account())
-    roster = svc.courses().students().list(courseId=course_id).execute().get("students", [])
-    coursework = (
-        svc.courses().courseWork().list(courseId=course_id).execute().get("courseWork", [])
+    roster = _collect_pages(
+        lambda tok: svc.courses().students().list(courseId=course_id, pageToken=tok),
+        "students",
+    )
+    coursework = _collect_pages(
+        lambda tok: svc.courses().courseWork().list(courseId=course_id, pageToken=tok),
+        "courseWork",
     )
     if not roster:
         return f"No students in course {course_id}."
@@ -232,11 +233,10 @@ def export_grades(course_id: str, output_path: str) -> str:
 
     grades: dict[str, dict[str, float]] = {}
     for cw in coursework:
-        subs = (
-            svc.courses().courseWork().studentSubmissions()
-            .list(courseId=course_id, courseWorkId=cw["id"])
-            .execute()
-            .get("studentSubmissions", [])
+        subs = _collect_pages(
+            lambda tok, cw_id=cw["id"]: svc.courses().courseWork().studentSubmissions()
+            .list(courseId=course_id, courseWorkId=cw_id, pageToken=tok),
+            "studentSubmissions",
         )
         for sub in subs:
             if "assignedGrade" in sub:
