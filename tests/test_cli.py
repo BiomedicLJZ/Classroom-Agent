@@ -178,6 +178,60 @@ class TestStartupBanner:
         assert "Could not load courses" in out
 
 
+class TestDefensiveStream:
+    def test_non_tuple_stream_items_do_not_crash(self, capsys):
+        class Bad:  # not a (mode, payload) tuple; not iterable
+            pass
+
+        mock_graph = MagicMock()
+        mock_graph.stream.return_value = iter([
+            ("messages", Bad()),   # bad payload inside messages mode
+            Bad(),                  # bad top-level item (the Overwrite case)
+            _chunk(text="OKTOKEN"),
+        ])
+        _run(mock_graph, ["switch to uniat", "exit"])
+        out = capsys.readouterr().out
+        assert "OKTOKEN" in out
+        assert "Error:" not in out  # no crash surfaced
+
+
+class TestIdsAndAccounts:
+    def test_render_ids_prints_full_raw_id(self, capsys):
+        from ta import cli
+        svc = MagicMock()
+        svc.courses().list().execute.return_value = {
+            "courses": [{"id": "866213548099", "name": "IA", "section": "X"}]
+        }
+        with patch("ta.tools.classroom._classroom_service", return_value=svc):
+            cli.render_ids("")
+        out = capsys.readouterr().out
+        assert "866213548099" in out  # full 12-digit ID, never abbreviated
+
+    def test_render_accounts_lists_when_no_alias(self, capsys):
+        from ta import cli
+        acct = MagicMock()
+        acct.client_secret_path = "credentials/x.json"
+        with patch("ta.tools.accounts.Settings") as mock_settings:
+            mock_settings.return_value.accounts = {"cugdl": acct, "uniat": acct}
+            cli.render_accounts("")
+        out = capsys.readouterr().out
+        assert "cugdl" in out and "uniat" in out
+
+    def test_ids_command_does_not_call_graph(self):
+        mock_graph = MagicMock()
+        with patch("ta.cli.render_ids") as r:
+            _run(mock_graph, ["/ids", "exit"])
+        mock_graph.stream.assert_not_called()
+        r.assert_called_once()
+
+    def test_account_command_does_not_call_graph(self):
+        mock_graph = MagicMock()
+        with patch("ta.cli.render_accounts") as r:
+            _run(mock_graph, ["/account uniat", "exit"])
+        mock_graph.stream.assert_not_called()
+        r.assert_called_once_with(" uniat")
+
+
 class TestSlashCompleter:
     def _complete(self, text):
         from prompt_toolkit.completion import CompleteEvent
@@ -196,6 +250,13 @@ class TestSlashCompleter:
 
     def test_suggests_modules_after_help(self):
         assert "grading" in self._complete("/help gr")
+
+    def test_suggests_ids_and_account(self):
+        texts = self._complete("/")
+        assert "/ids" in texts and "/account" in texts
+
+    def test_suggests_account_aliases(self):
+        assert "uniat" in self._complete("/account un")
 
     def test_no_completion_for_plain_text(self):
         assert self._complete("list my courses") == []

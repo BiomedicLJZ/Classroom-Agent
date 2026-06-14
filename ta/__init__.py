@@ -12,6 +12,8 @@ _NVIDIA_WARNING_PATTERNS = (
     r".*chat_template_kwargs is not default parameter.*",
     r".*max_tokens.*deprecated.*",
     r".*type is unknown and inference may fail.*",
+    r".*is not known to support tools.*",
+    r".*tool binding may fail.*",
 )
 
 

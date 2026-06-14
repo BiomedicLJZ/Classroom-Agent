@@ -23,9 +23,13 @@ Return ONLY valid JSON with this exact schema:
   "score": total_float,
   "max_score": max_float,
   "feedback_text": "narrative feedback for the student",
-  "inline_comments": []
+  "inline_comments": [
+    {"anchor_text": "exact substring from the submission to anchor the comment",
+     "comment": "specific feedback for this section"}
+  ]
 }
-Do not include any text outside the JSON object."""
+For inline_comments, provide 2-5 specific observations anchored to exact substrings \
+from the student's work. Do not include any text outside the JSON object."""
 
 
 @lru_cache(maxsize=1)

@@ -216,6 +216,8 @@ def _prompt_confirmations(interrupts) -> dict:
 # Used for both autocomplete and /help.
 _SLASH_COMMANDS = {
     "/help": "Show help; use /help <module> for a capability area",
+    "/ids": "Show RAW Classroom IDs for the active account (/ids <course_id> for one)",
+    "/account": "Show or switch Google account (/account uniat)",
     "/think on": "Enable model reasoning (slower; shows raw thinking)",
     "/think off": "Disable model reasoning (faster)",
 }
@@ -279,6 +281,15 @@ class SlashCompleter(Completer):
                     yield Completion(
                         module, start_position=-len(partial),
                         display=module, display_meta="help topic",
+                    )
+            return
+        if text.startswith("/account "):
+            partial = text[len("/account "):].lstrip()
+            for account in ("cugdl", "uniat"):
+                if account.startswith(partial):
+                    yield Completion(
+                        account, start_position=-len(partial),
+                        display=account, display_meta="account",
                     )
             return
         for cmd, desc in _SLASH_COMMANDS.items():
@@ -360,9 +371,40 @@ def render_startup_banner() -> None:
         table.add_row(str(c.get("id", "")), c.get("name", "Unnamed"), c.get("section", ""))
     console.print(table)
     console.print(
-        "[dim]Use a Course ID above, or ask me to list IDs for a course to get "
+        "[dim]Use a Course ID above, or run /ids <course_id> for that course's "
         "students / assignments / topics.[/dim]"
     )
+
+
+def render_ids(course_id: str = "") -> None:
+    """Print RAW Classroom IDs for the active account, verbatim — bypasses the LLM
+    so the IDs are never abbreviated. /ids → courses; /ids <id> → one course's
+    students/assignments/topics."""
+    from ta.tools.classroom import list_course_ids
+    result = list_course_ids.func(course_id.strip())
+    console.print(Panel(
+        Text(result), title=Text("🆔 Raw Classroom IDs", style="bold cyan"),
+        title_align="left", border_style="cyan", padding=(0, 1),
+    ))
+
+
+def render_accounts(alias: str = "") -> None:
+    """Show or switch the active Google account deterministically (no LLM). With an
+    alias, switch and re-show that account's course IDs."""
+    from ta.tools.accounts import list_accounts, switch_account
+    alias = alias.strip().lower()
+    if not alias:
+        console.print(Panel(
+            Text(list_accounts.func()), title=Text("🔑 Accounts", style="bold cyan"),
+            title_align="left", border_style="cyan", padding=(0, 1),
+        ))
+        return
+    msg = switch_account.func(alias)
+    if msg.startswith("Unknown"):
+        console.print(f"[yellow]{msg}[/yellow]")
+        return
+    console.print(f"[dim]{msg}[/dim]")
+    render_startup_banner()
 
 
 def run_repl(
@@ -386,8 +428,9 @@ def run_repl(
         "[bold green]Classroom TA Agent[/bold green] ready.\n"
         "Type your request and press Enter. Type [bold]exit[/bold] to quit.\n"
         "Answers render as rich Markdown (tables, code, links).\n"
-        "Type [bold]/[/bold] for command autocomplete; [bold]/help[/bold] lists everything "
-        "([bold]/help <module>[/bold] for detail).\n"
+        "Type [bold]/[/bold] for command autocomplete; [bold]/help[/bold] lists everything.\n"
+        "[bold]/ids[/bold] shows raw course IDs; [bold]/account <alias>[/bold] switches "
+        "Google account (cugdl/uniat).\n"
         f"[bold]/think on|off[/bold] toggles model reasoning (now [bold]{reasoning_state}[/bold]); "
         "raw reasoning streams in grey when on.\n\n"
         "[dim]Examples:[/dim]\n"
@@ -414,6 +457,12 @@ def run_repl(
         if user_input.lower() == "/help" or user_input.lower().startswith("/help "):
             render_help(user_input[len("/help"):])
             continue
+        if user_input.lower() == "/ids" or user_input.lower().startswith("/ids "):
+            render_ids(user_input[len("/ids"):])
+            continue
+        if user_input.lower() == "/account" or user_input.lower().startswith("/account "):
+            render_accounts(user_input[len("/account"):])
+            continue
         if user_input.lower() in ("/think on", "/think off"):
             thinking = user_input.lower().endswith("on")
             graph = make_graph(thinking)
@@ -431,12 +480,20 @@ def run_repl(
             }
             while True:
                 got_interrupt = False
-                for mode, payload in graph.stream(
+                for item in graph.stream(
                     stream_input, config, stream_mode=["messages", "updates"]
                 ):
+                    # Defensive: langgraph/deepagents can emit non-(mode, payload)
+                    # values (e.g. an Overwrite state wrapper). Skip anything that
+                    # doesn't match the expected shape instead of crashing the turn.
+                    if not (isinstance(item, tuple) and len(item) == 2):
+                        continue
+                    mode, payload = item
                     if mode == "messages":
-                        chunk, metadata = payload
-                        renderer.on_chunk(chunk, metadata)
+                        if isinstance(payload, tuple) and len(payload) == 2:
+                            renderer.on_chunk(*payload)
+                        continue
+                    if not isinstance(payload, dict):
                         continue
                     if "__interrupt__" in payload:
                         renderer.finish()

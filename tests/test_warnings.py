@@ -9,7 +9,10 @@ def test_nvidia_integration_warnings_suppressed():
     import ta
     # pytest resets warnings.filters per test, so re-apply explicitly before checking.
     ta._install_nvidia_warning_filters()
-    keys = ("reasoning_budget", "chat_template_kwargs", "max_tokens", "type is unknown")
+    keys = (
+        "reasoning_budget", "chat_template_kwargs", "max_tokens", "type is unknown",
+        "support tools",
+    )
     ignored = [
         f for f in warnings.filters
         if f[0] == "ignore" and f[1] is not None
