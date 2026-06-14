@@ -83,9 +83,10 @@ class TestBuildAgent:
             "list_announcements", "update_announcement", "delete_announcement",
             "list_materials", "update_material", "delete_material",
             "list_topics", "create_topic", "export_grades", "import_grades",
+            "list_course_ids",
         ]:
             assert expected in names, f"Missing tool: {expected}"
 
     def test_minimum_tool_count(self):
         from ta.tools import ALL_TOOLS
-        assert len(ALL_TOOLS) >= 43
+        assert len(ALL_TOOLS) >= 44

@@ -201,6 +201,36 @@ class TestMaterialAdmin:
         assert "deleted" in result
 
 
+class TestListCourseIds:
+    def test_lists_courses_when_no_id(self):
+        svc = _service_mock()
+        svc.courses().list().execute.return_value = {
+            "courses": [{"id": "111", "name": "IA", "section": "A"}]
+        }
+        with patch("ta.tools.classroom._classroom_service", return_value=svc):
+            from ta.tools.classroom import list_course_ids
+            result = list_course_ids.func()
+        assert "111" in result and "IA" in result
+
+    def test_dumps_course_object_ids(self):
+        svc = _service_mock()
+        svc.courses().students().list().execute.return_value = {
+            "students": [{"userId": "u1", "profile": {"name": {"fullName": "Ana"}}}]
+        }
+        svc.courses().courseWork().list().execute.return_value = {
+            "courseWork": [{"id": "w1", "title": "HW1"}]
+        }
+        svc.courses().topics().list().execute.return_value = {
+            "topic": [{"topicId": "t1", "name": "Unit 1"}]
+        }
+        with patch("ta.tools.classroom._classroom_service", return_value=svc):
+            from ta.tools.classroom import list_course_ids
+            result = list_course_ids.func(course_id="111")
+        assert "u1" in result and "Ana" in result
+        assert "w1" in result and "HW1" in result
+        assert "t1" in result and "Unit 1" in result
+
+
 class TestDraftAndScheduled:
     def test_post_announcement_drafts_by_default(self):
         svc = _service_mock()

@@ -590,3 +590,58 @@ def create_topic(course_id: str, name: str) -> str:
     except HttpError as exc:
         return _http_error_msg(exc, course_id=course_id)
     return f"Topic created: [{result['topicId']}] {result['name']}"
+
+
+@tool
+def list_course_ids(course_id: str = "") -> str:
+    """Show raw Google Classroom IDs so you never have to guess them. With NO
+    argument, lists every active course with its ID. With a course_id, dumps that
+    course's students, assignments (coursework), and topics — each with its ID — in
+    one call. Read-only; call this first whenever you need an ID for another tool."""
+    svc = _classroom_service(get_active_account())
+    if not course_id:
+        courses = _collect_pages(
+            lambda tok: svc.courses().list(courseStates=["ACTIVE"], pageToken=tok),
+            "courses",
+        )
+        if not courses:
+            return "No active courses found."
+        lines = [
+            f"- [{c['id']}] {c.get('name', 'Unnamed')} — {c.get('section', '')}"
+            for c in courses
+        ]
+        return (
+            "Active courses (pass a course ID back to dump its object IDs):\n"
+            + "\n".join(lines)
+        )
+
+    try:
+        students = _collect_pages(
+            lambda tok: svc.courses().students().list(courseId=course_id, pageToken=tok),
+            "students",
+        )
+        coursework = _collect_pages(
+            lambda tok: svc.courses().courseWork().list(courseId=course_id, pageToken=tok),
+            "courseWork",
+        )
+        topics = _collect_pages(
+            lambda tok: svc.courses().topics().list(courseId=course_id, pageToken=tok),
+            "topic",
+        )
+    except HttpError as exc:
+        return _http_error_msg(exc, course_id=course_id)
+
+    blocks = [f"IDs for course {course_id}:", "\nStudents:"]
+    blocks += [
+        f"  [{s['userId']}] {s.get('profile', {}).get('name', {}).get('fullName', 'Unknown')}"
+        for s in students
+    ] or ["  (none)"]
+    blocks.append("\nAssignments (coursework):")
+    blocks += [f"  [{cw['id']}] {cw.get('title', 'Untitled')}" for cw in coursework] or [
+        "  (none)"
+    ]
+    blocks.append("\nTopics:")
+    blocks += [f"  [{t['topicId']}] {t.get('name', 'Unnamed')}" for t in topics] or [
+        "  (none)"
+    ]
+    return "\n".join(blocks)

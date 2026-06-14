@@ -13,6 +13,7 @@ from ta.tools.classroom import (
     invite_user,
     list_announcements,
     list_assignments,
+    list_course_ids,
     list_courses,
     list_invitations,
     list_materials,
@@ -51,6 +52,7 @@ ALL_TOOLS = [
     list_accounts,
     switch_account,
     # Classroom — read
+    list_course_ids,
     list_courses,
     list_students,
     list_assignments,
