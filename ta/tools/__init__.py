@@ -29,6 +29,7 @@ from ta.tools.grading import (
     analyze_submission,
     batch_grade_assignment,
     export_grades,
+    import_grades,
     load_rubric,
     post_grade,
 )
@@ -80,6 +81,7 @@ ALL_TOOLS = [
     batch_grade_assignment,
     post_grade,
     export_grades,
+    import_grades,
     # Drive
     get_drive_file_text,
     upload_file_to_drive,

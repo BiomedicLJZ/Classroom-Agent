@@ -276,3 +276,82 @@ def export_grades(course_id: str, output_path: str) -> str:
         f"Grades exported: {len(roster)} students × {len(coursework)} assignments "
         f"→ {output_path}"
     )
+
+
+@tool
+def import_grades(course_id: str, coursework_id: str, xlsx_path: str) -> str:
+    """Bulk-post grades for an assignment from an .xlsx file. Required header
+    columns: 'Email', 'Grade'; optional 'Feedback' (delivered as a comment on each
+    student's submitted Drive file). One confirmation covers the whole batch.
+    Unknown emails and non-numeric grades are skipped and reported."""
+    from openpyxl import load_workbook
+
+    from ta.tools.classroom import _classroom_service, _collect_pages
+
+    path = Path(xlsx_path)
+    if not path.exists():
+        return f"Error: file not found: {xlsx_path}"
+    rows = list(load_workbook(path, read_only=True).active.values)
+    if not rows:
+        return "Error: empty spreadsheet."
+    headers = [str(h).strip().lower() if h else "" for h in rows[0]]
+    if "email" not in headers or "grade" not in headers:
+        return "Error: spreadsheet must have 'Email' and 'Grade' header columns."
+    email_i, grade_i = headers.index("email"), headers.index("grade")
+    fb_i = headers.index("feedback") if "feedback" in headers else None
+
+    svc = _classroom_service(get_active_account())
+    roster = _collect_pages(
+        lambda tok: svc.courses().students().list(courseId=course_id, pageToken=tok),
+        "students",
+    )
+    email_to_id = {
+        s.get("profile", {}).get("emailAddress", "").lower(): s["userId"]
+        for s in roster
+    }
+
+    entries: list[tuple[str, str, float, str]] = []
+    skipped: list[str] = []
+    for row in rows[1:]:
+        email = str(row[email_i] or "").strip().lower()
+        if not email:
+            continue
+        user_id = email_to_id.get(email)
+        if not user_id:
+            skipped.append(f"{email}: not enrolled")
+            continue
+        try:
+            score = float(row[grade_i])
+        except (TypeError, ValueError):
+            skipped.append(f"{email}: grade '{row[grade_i]}' is not numeric")
+            continue
+        feedback = str(row[fb_i] or "") if fb_i is not None else ""
+        entries.append((email, user_id, score, feedback))
+
+    if not entries:
+        return "No valid rows to post.\n" + "\n".join(f"- SKIPPED {s}" for s in skipped)
+
+    scores = [e[2] for e in entries]
+    preview = "\n".join(f"  {e[0]} → {e[2]}" for e in entries[:3])
+    confirmed = interrupt({
+        "action": "import_grades",
+        "details": (
+            f"Post {len(entries)} grades to assignment {coursework_id} "
+            f"in course {course_id}\n"
+            f"Range: {min(scores)}–{max(scores)}\nFirst rows:\n{preview}"
+        ),
+    })
+    if not confirmed:
+        return "Grade import cancelled."
+
+    results = []
+    undelivered = 0
+    for email, user_id, score, feedback in entries:
+        msg = _post_one_grade(svc, course_id, coursework_id, user_id, score, feedback)
+        if "NOT delivered" in msg:
+            undelivered += 1
+        results.append(f"- {email}: {msg}")
+    summary = f"Imported {len(entries)} grades; {len(skipped)} skipped"
+    if undelivered:
+        summary += f"; {undelivered} feedback(s) undelivered"
+    return summary + ".\n" + "\n".join(results + [f"- SKIPPED {s}" for s in skipped])

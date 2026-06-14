@@ -157,3 +157,49 @@ class TestExportGrades:
         assert rows[1] == ("Ana López", "ana@school.mx", 9.5, 8.0)
         assert rows[2] == ("Beto Ruiz", "beto@school.mx", None, 10.0)
         assert "2 students" in result
+
+
+class TestImportGrades:
+    def test_imports_known_students_and_reports_unknown(self, tmp_path):
+        from openpyxl import Workbook
+        wb = Workbook()
+        ws = wb.active
+        ws.append(["Email", "Grade", "Feedback"])
+        ws.append(["ana@school.mx", 9.5, "Bien"])
+        ws.append(["beto@school.mx", 8, ""])
+        ws.append(["charlie@school.mx", 7, ""])  # not enrolled
+        xlsx = tmp_path / "grades.xlsx"
+        wb.save(xlsx)
+
+        svc = MagicMock()
+        svc.courses().students().list().execute.return_value = {
+            "students": [
+                {"userId": "u-ana", "profile": {"emailAddress": "ana@school.mx"}},
+                {"userId": "u-beto", "profile": {"emailAddress": "beto@school.mx"}},
+            ]
+        }
+        sub_list = svc.courses().courseWork().studentSubmissions().list().execute
+        sub_list.side_effect = [
+            {"studentSubmissions": [{
+                "id": "sub-ana", "userId": "u-ana",
+                "assignmentSubmission": {"attachments": [{"driveFile": {"id": "f-ana"}}]},
+            }]},
+            {"studentSubmissions": [{"id": "sub-beto", "userId": "u-beto"}]},
+        ]
+        drive = MagicMock()
+        captured: list[dict] = []
+        with patch("ta.tools.grading.interrupt",
+                   side_effect=lambda p: captured.append(p) or True), \
+             patch("ta.tools.classroom._classroom_service", return_value=svc), \
+             patch("ta.tools.drive._drive_service", return_value=drive):
+            from ta.tools.grading import import_grades
+            result = import_grades.func(
+                course_id="c1", coursework_id="w1", xlsx_path=str(xlsx)
+            )
+
+        assert "Post 2 grades" in captured[0]["details"]
+        assert "Imported 2 grades" in result
+        assert "charlie@school.mx" in result and "not enrolled" in result
+        patch_call = svc.courses().courseWork().studentSubmissions().patch
+        assert patch_call.call_count == 2
+        assert drive.comments().create.call_count == 1  # only Ana had feedback+file

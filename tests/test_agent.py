@@ -39,6 +39,27 @@ class TestBuildAgent:
         from ta.agent import SYSTEM_PROMPT
         assert "REWRITE PROTOCOL" in SYSTEM_PROMPT
 
+    def test_build_agent_accepts_injected_checkpointer(self, monkeypatch):
+        monkeypatch.setenv("NVIDIA_API_KEY", "nvapi-test")
+        fake_cp = MagicMock()
+        with patch("ta.agent.ChatNVIDIA"), \
+             patch("ta.agent.create_deep_agent") as mock_create:
+            from ta.agent import build_agent
+            from ta.config import Settings
+            build_agent(Settings(), checkpointer=fake_cp)
+            assert mock_create.call_args.kwargs["checkpointer"] is fake_cp
+
+    def test_build_agent_defaults_to_sqlite(self, monkeypatch, tmp_path):
+        monkeypatch.setenv("NVIDIA_API_KEY", "nvapi-test")
+        monkeypatch.chdir(tmp_path)  # checkpoints.db lands in tmp, not the repo
+        with patch("ta.agent.ChatNVIDIA"), \
+             patch("ta.agent.create_deep_agent") as mock_create:
+            from ta.agent import build_agent
+            from ta.config import Settings
+            build_agent(Settings())
+            from langgraph.checkpoint.sqlite import SqliteSaver
+            assert isinstance(mock_create.call_args.kwargs["checkpointer"], SqliteSaver)
+
     def test_all_tools_registered(self):
         from ta.tools import ALL_TOOLS
         names = [t.name for t in ALL_TOOLS]
@@ -51,10 +72,10 @@ class TestBuildAgent:
             "update_assignment", "delete_assignment",
             "list_announcements", "update_announcement", "delete_announcement",
             "list_materials", "update_material", "delete_material",
-            "list_topics", "create_topic", "export_grades",
+            "list_topics", "create_topic", "export_grades", "import_grades",
         ]:
             assert expected in names, f"Missing tool: {expected}"
 
     def test_minimum_tool_count(self):
         from ta.tools import ALL_TOOLS
-        assert len(ALL_TOOLS) >= 42
+        assert len(ALL_TOOLS) >= 43
