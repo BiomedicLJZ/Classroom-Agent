@@ -1,6 +1,9 @@
 # main.py
 import argparse
+import sqlite3
 from datetime import date
+
+from langgraph.checkpoint.sqlite import SqliteSaver
 
 from ta.agent import build_agent
 from ta.cli import run_repl
@@ -19,8 +22,18 @@ def main() -> None:
 
     settings = Settings()
     get_credentials("cugdl")
-    graph = build_agent(settings)
-    run_repl(graph, {"configurable": {"thread_id": args.thread}})
+    checkpointer = SqliteSaver(
+        sqlite3.connect("checkpoints.db", check_same_thread=False)
+    )
+
+    def make_graph(thinking: bool):
+        return build_agent(settings, checkpointer=checkpointer, enable_thinking=thinking)
+
+    run_repl(
+        make_graph,
+        {"configurable": {"thread_id": args.thread}},
+        initial_thinking=settings.nvidia_enable_thinking,
+    )
 
 
 if __name__ == "__main__":

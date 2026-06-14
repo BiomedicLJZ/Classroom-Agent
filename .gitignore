@@ -20,3 +20,4 @@ dist/
 build/
 .omc/
 checkpoints.db
+.ta_history

@@ -1,7 +1,13 @@
 # ta/cli.py
+from collections.abc import Callable
+
 from langchain_core.messages import AIMessageChunk, HumanMessage
 from langgraph.types import Command
+from prompt_toolkit import PromptSession
+from prompt_toolkit.history import FileHistory
 from rich.console import Console
+from rich.live import Live
+from rich.markdown import Markdown
 from rich.panel import Panel
 
 console = Console()
@@ -39,11 +45,13 @@ def _chunk_text(chunk: AIMessageChunk) -> str:
 
 
 class StreamRenderer:
-    """Live token display: raw thinking in dim grey first, answer plain after."""
+    """Raw thinking streams dim grey; the answer renders as live Markdown."""
 
     def __init__(self) -> None:
         self.section: str | None = None  # None | "thinking" | "answer"
         self.streamed_answer = False  # any answer tokens shown this turn
+        self._answer_buf = ""
+        self._live: Live | None = None
 
     def on_chunk(self, chunk: AIMessageChunk, metadata: dict | None) -> None:
         if not isinstance(chunk, AIMessageChunk):
@@ -52,30 +60,42 @@ class StreamRenderer:
         tag = "" if node in _MAIN_NODES else f"[{node}] "
         reasoning = _chunk_reasoning(chunk)
         if reasoning:
-            self._enter_section("thinking", f"🧠 {tag}thinking", "bold magenta")
+            if self.section != "thinking":
+                self._close_current()
+                console.print(f"\n🧠 {tag}thinking", style="bold magenta", markup=False)
+                self.section = "thinking"
             console.print(
                 reasoning, style="grey50 italic", end="",
                 soft_wrap=True, markup=False, highlight=False,
             )
         text = _chunk_text(chunk)
         if text:
-            self._enter_section("answer", f"💬 {tag}TA Agent", "bold blue")
+            if self.section != "answer":
+                self._close_current()
+                console.print(f"\n💬 {tag}TA Agent", style="bold blue", markup=False)
+                self.section = "answer"
+                self._answer_buf = ""
+                self._live = Live(
+                    Markdown(""), console=console,
+                    refresh_per_second=8, vertical_overflow="visible",
+                )
+                self._live.start()
             self.streamed_answer = True
-            console.print(text, end="", soft_wrap=True, markup=False, highlight=False)
+            self._answer_buf += text
+            if self._live is not None:
+                self._live.update(Markdown(self._answer_buf))
 
-    def _enter_section(self, name: str, header: str, style: str) -> None:
-        if self.section == name:
-            return
-        if self.section is not None:
-            console.print()  # close the in-progress streamed line
-        console.print(f"\n{header}", style=style, markup=False)
-        self.section = name
+    def _close_current(self) -> None:
+        if self.section == "answer" and self._live is not None:
+            self._live.stop()  # leaves the final Markdown render on screen
+            self._live = None
+        elif self.section == "thinking":
+            console.print()  # close the in-progress dim line
+        self.section = None
 
     def finish(self) -> None:
         """Close any open stream section — call before prompts, notices, errors."""
-        if self.section is not None:
-            console.print()
-        self.section = None
+        self._close_current()
 
 
 def _handle_update(payload: dict, renderer: StreamRenderer) -> None:
@@ -99,7 +119,7 @@ def _handle_update(payload: dict, renderer: StreamRenderer) -> None:
                 and content.strip()
             ):
                 renderer.finish()
-                console.print(content, markup=False, highlight=False)
+                console.print(Markdown(content))
 
 
 def _prompt_confirmations(interrupts) -> dict:
@@ -143,12 +163,19 @@ def _prompt_confirmations(interrupts) -> dict:
     return resume_values
 
 
-def run_repl(graph, config: dict) -> None:
-    """Run the interactive CLI REPL for the TA agent."""
+def run_repl(make_graph: Callable, config: dict, initial_thinking: bool = True) -> None:
+    """Interactive REPL. make_graph(thinking: bool) builds the agent graph — the
+    /think command rebuilds it against the same checkpointer, so the conversation
+    thread continues with reasoning toggled."""
+    thinking = initial_thinking
+    graph = make_graph(thinking)
+    session = PromptSession(history=FileHistory(".ta_history"))
+
     console.print(Panel(
         "[bold green]Classroom TA Agent[/bold green] ready.\n"
         "Type your request and press Enter. Type [bold]exit[/bold] to quit.\n"
-        "Raw model reasoning streams in grey before each answer.\n\n"
+        "Raw model reasoning streams in grey; answers render as Markdown.\n"
+        "[bold]/think on|off[/bold] toggles model reasoning.\n\n"
         "[dim]Examples:[/dim]\n"
         "  List my courses\n"
         "  Grade all submissions for assignment 987 using rubric rubrics/hw1.yaml\n"
@@ -158,7 +185,7 @@ def run_repl(graph, config: dict) -> None:
 
     while True:
         try:
-            user_input = input("\n[You]: ").strip()
+            user_input = session.prompt("\n[You]: ").strip()
         except (EOFError, KeyboardInterrupt):
             console.print("\n[dim]Goodbye.[/dim]")
             break
@@ -168,6 +195,13 @@ def run_repl(graph, config: dict) -> None:
         if user_input.lower() in ("exit", "quit", "q"):
             console.print("[dim]Goodbye.[/dim]")
             break
+        if user_input.lower() in ("/think on", "/think off"):
+            thinking = user_input.lower().endswith("on")
+            graph = make_graph(thinking)
+            console.print(
+                f"[dim]Reasoning {'enabled' if thinking else 'disabled'}.[/dim]"
+            )
+            continue
 
         renderer = StreamRenderer()
         try:

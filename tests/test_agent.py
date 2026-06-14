@@ -39,6 +39,16 @@ class TestBuildAgent:
         from ta.agent import SYSTEM_PROMPT
         assert "REWRITE PROTOCOL" in SYSTEM_PROMPT
 
+    def test_enable_thinking_override(self, monkeypatch):
+        monkeypatch.setenv("NVIDIA_API_KEY", "nvapi-test")
+        with patch("ta.agent.ChatNVIDIA") as mock_llm_cls, \
+             patch("ta.agent.create_deep_agent"):
+            from ta.agent import build_agent
+            from ta.config import Settings
+            build_agent(Settings(), checkpointer=MagicMock(), enable_thinking=False)
+            kwargs = mock_llm_cls.call_args.kwargs
+            assert kwargs["chat_template_kwargs"] == {"enable_thinking": False}
+
     def test_build_agent_accepts_injected_checkpointer(self, monkeypatch):
         monkeypatch.setenv("NVIDIA_API_KEY", "nvapi-test")
         fake_cp = MagicMock()

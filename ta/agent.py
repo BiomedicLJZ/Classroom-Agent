@@ -78,7 +78,7 @@ Do NOT post grades — that is the main agent's responsibility after instructor 
 """
 
 
-def build_agent(settings: Settings, checkpointer=None):
+def build_agent(settings: Settings, checkpointer=None, enable_thinking: bool | None = None):
     if checkpointer is None:
         import sqlite3
 
@@ -86,6 +86,7 @@ def build_agent(settings: Settings, checkpointer=None):
         checkpointer = SqliteSaver(
             sqlite3.connect("checkpoints.db", check_same_thread=False)
         )
+    thinking = settings.nvidia_enable_thinking if enable_thinking is None else enable_thinking
     llm = ChatNVIDIA(
         model=settings.nvidia_model,
         api_key=settings.nvidia_api_key,
@@ -93,7 +94,7 @@ def build_agent(settings: Settings, checkpointer=None):
         top_p=settings.nvidia_top_p,
         max_tokens=settings.nvidia_max_tokens,
         reasoning_budget=settings.nvidia_reasoning_budget,
-        chat_template_kwargs={"enable_thinking": settings.nvidia_enable_thinking},
+        chat_template_kwargs={"enable_thinking": thinking},
     )
 
     grading_subagent: SubAgent = {
