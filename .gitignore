@@ -25,3 +25,5 @@ checkpoints.db*
 # IDEs
 .idea/
 .vscode/
+CLAUDE.md
+GEMINI.md
