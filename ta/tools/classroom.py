@@ -31,6 +31,19 @@ def _classroom_service(alias: str):
     return build("classroom", "v1", credentials=creds)
 
 
+def _collect_pages(make_request, items_key: str) -> list:
+    """Follow nextPageToken until exhausted. make_request(page_token) must return
+    an executable API request for that page."""
+    items: list = []
+    token = None
+    while True:
+        response = make_request(token).execute(num_retries=3)
+        items.extend(response.get(items_key, []))
+        token = response.get("nextPageToken")
+        if not token:
+            return items
+
+
 @tool
 def list_courses() -> str:
     """List all active Google Classroom courses the authenticated user has access to."""
@@ -47,8 +60,10 @@ def list_courses() -> str:
 def list_students(course_id: str) -> str:
     """List all enrolled students in a Google Classroom course."""
     svc = _classroom_service(get_active_account())
-    response = svc.courses().students().list(courseId=course_id).execute()
-    students = response.get("students", [])
+    students = _collect_pages(
+        lambda tok: svc.courses().students().list(courseId=course_id, pageToken=tok),
+        "students",
+    )
     if not students:
         return f"No students found in course {course_id}."
     lines = []
@@ -64,8 +79,10 @@ def list_students(course_id: str) -> str:
 def list_assignments(course_id: str) -> str:
     """List all coursework (assignments, quizzes) in a Google Classroom course."""
     svc = _classroom_service(get_active_account())
-    response = svc.courses().courseWork().list(courseId=course_id).execute()
-    items = response.get("courseWork", [])
+    items = _collect_pages(
+        lambda tok: svc.courses().courseWork().list(courseId=course_id, pageToken=tok),
+        "courseWork",
+    )
     if not items:
         return f"No assignments found in course {course_id}."
     lines = [
@@ -80,12 +97,11 @@ def get_submission_status(course_id: str, coursework_id: str) -> str:
     """Return submission state for every student in an assignment.
     States: NEW, CREATED, TURNED_IN, RETURNED, RECLAIMED_BY_STUDENT."""
     svc = _classroom_service(get_active_account())
-    response = (
-        svc.courses().courseWork().studentSubmissions()
-        .list(courseId=course_id, courseWorkId=coursework_id)
-        .execute()
+    subs = _collect_pages(
+        lambda tok: svc.courses().courseWork().studentSubmissions()
+        .list(courseId=course_id, courseWorkId=coursework_id, pageToken=tok),
+        "studentSubmissions",
     )
-    subs = response.get("studentSubmissions", [])
     if not subs:
         return "No submissions found."
     lines = [f"- [{s['userId']}] Submission {s['id']}: {s.get('state', 'UNKNOWN')}" for s in subs]
@@ -204,8 +220,10 @@ def invite_user(course_id: str, user_email: str, role: str) -> str:
 def list_invitations(course_id: str) -> str:
     """List all pending invitations for a Google Classroom course."""
     svc = _classroom_service(get_active_account())
-    response = svc.invitations().list(courseId=course_id).execute()
-    invitations = response.get("invitations", [])
+    invitations = _collect_pages(
+        lambda tok: svc.invitations().list(courseId=course_id, pageToken=tok),
+        "invitations",
+    )
     if not invitations:
         return f"No pending invitations for course {course_id}."
     lines = [
@@ -360,12 +378,14 @@ def list_announcements(course_id: str) -> str:
     """List announcements in a course with their IDs, newest first."""
     svc = _classroom_service(get_active_account())
     try:
-        response = svc.courses().announcements().list(
-            courseId=course_id, orderBy="updateTime desc", pageSize=20
-        ).execute()
+        items = _collect_pages(
+            lambda tok: svc.courses().announcements().list(
+                courseId=course_id, orderBy="updateTime desc", pageSize=50, pageToken=tok
+            ),
+            "announcements",
+        )
     except HttpError as exc:
         return _http_error_msg(exc, course_id=course_id)
-    items = response.get("announcements", [])
     if not items:
         return f"No announcements in course {course_id}."
     lines = [
@@ -437,12 +457,14 @@ def list_materials(course_id: str) -> str:
     """List courseWork materials in a course with their IDs."""
     svc = _classroom_service(get_active_account())
     try:
-        response = svc.courses().courseWorkMaterials().list(
-            courseId=course_id, pageSize=20
-        ).execute()
+        items = _collect_pages(
+            lambda tok: svc.courses().courseWorkMaterials().list(
+                courseId=course_id, pageSize=50, pageToken=tok
+            ),
+            "courseWorkMaterial",
+        )
     except HttpError as exc:
         return _http_error_msg(exc, course_id=course_id)
-    items = response.get("courseWorkMaterial", [])
     if not items:
         return f"No materials in course {course_id}."
     lines = [

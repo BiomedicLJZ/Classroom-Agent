@@ -201,6 +201,47 @@ class TestMaterialAdmin:
         assert "deleted" in result
 
 
+class TestPagination:
+    def test_list_students_follows_page_tokens(self):
+        svc = _service_mock()
+        list_call = svc.courses().students().list
+        list_call.return_value.execute.side_effect = [
+            {
+                "students": [{
+                    "userId": "s1",
+                    "profile": {"name": {"fullName": "Ana"}, "emailAddress": "a@x.mx"},
+                }],
+                "nextPageToken": "tok2",
+            },
+            {
+                "students": [{
+                    "userId": "s2",
+                    "profile": {"name": {"fullName": "Beto"}, "emailAddress": "b@x.mx"},
+                }],
+            },
+        ]
+        with patch("ta.tools.classroom._classroom_service", return_value=svc):
+            from ta.tools.classroom import list_students
+            result = list_students.func(course_id="c1")
+        assert "Ana" in result and "Beto" in result
+        assert list_call.call_count == 2
+        assert list_call.call_args_list[1].kwargs["pageToken"] == "tok2"
+
+    def test_list_announcements_follows_page_tokens(self):
+        svc = _service_mock()
+        list_call = svc.courses().announcements().list
+        list_call.return_value.execute.side_effect = [
+            {"announcements": [{"id": "a1", "state": "PUBLISHED", "text": "One"}],
+             "nextPageToken": "t2"},
+            {"announcements": [{"id": "a2", "state": "DRAFT", "text": "Two"}]},
+        ]
+        with patch("ta.tools.classroom._classroom_service", return_value=svc):
+            from ta.tools.classroom import list_announcements
+            result = list_announcements.func(course_id="c1")
+        assert "a1" in result and "a2" in result
+        assert list_call.call_count == 2
+
+
 class TestTopics:
     def test_list_topics(self):
         svc = _service_mock()
