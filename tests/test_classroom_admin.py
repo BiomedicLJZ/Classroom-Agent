@@ -201,6 +201,59 @@ class TestMaterialAdmin:
         assert "deleted" in result
 
 
+class TestDraftAndScheduled:
+    def test_post_announcement_drafts_by_default(self):
+        svc = _service_mock()
+        svc.courses().announcements().create().execute.return_value = {"id": "a1"}
+        with patch("ta.tools.classroom.interrupt", return_value=True), \
+             patch("ta.tools.classroom._classroom_service", return_value=svc):
+            from ta.tools.classroom import post_announcement
+            post_announcement.func(course_id="c1", text="Hola")
+        body = svc.courses().announcements().create.call_args.kwargs["body"]
+        assert body["state"] == "DRAFT"
+        assert "scheduledTime" not in body
+
+    def test_scheduled_time_converts_to_utc_and_forces_draft(self):
+        svc = _service_mock()
+        svc.courses().announcements().create().execute.return_value = {"id": "a1"}
+        with patch("ta.tools.classroom.interrupt", return_value=True), \
+             patch("ta.tools.classroom._classroom_service", return_value=svc):
+            from ta.tools.classroom import post_announcement
+            post_announcement.func(
+                course_id="c1", text="Hola", state="PUBLISHED",
+                scheduled_time="2026-06-15 08:00",
+            )
+        body = svc.courses().announcements().create.call_args.kwargs["body"]
+        assert body["scheduledTime"] == "2026-06-15T14:00:00Z"  # CDMX is UTC-6
+        assert body["state"] == "DRAFT"  # API requires DRAFT while scheduled
+
+    def test_create_assignment_draft_default(self):
+        svc = _service_mock()
+        svc.courses().courseWork().create().execute.return_value = {"id": "w1", "title": "T"}
+        with patch("ta.tools.classroom.interrupt", return_value=True), \
+             patch("ta.tools.classroom._classroom_service", return_value=svc):
+            from ta.tools.classroom import create_assignment
+            create_assignment.func(
+                course_id="c1", title="T", description="D", max_points=10.0,
+                due_date="2026-06-20", due_time="23:59", materials_drive_ids=[],
+            )
+        body = svc.courses().courseWork().create.call_args.kwargs["body"]
+        assert body["state"] == "DRAFT"
+
+    def test_create_material_draft_default(self):
+        svc = _service_mock()
+        svc.courses().courseWorkMaterials().create().execute.return_value = {"id": "m1"}
+        with patch("ta.tools.classroom.interrupt", return_value=True), \
+             patch("ta.tools.classroom._classroom_service", return_value=svc):
+            from ta.tools.classroom import create_material
+            create_material.func(
+                course_id="c1", title="M", description="D",
+                drive_file_ids=[], youtube_urls=[], link_urls=[],
+            )
+        body = svc.courses().courseWorkMaterials().create.call_args.kwargs["body"]
+        assert body["state"] == "DRAFT"
+
+
 class TestPagination:
     def test_list_students_follows_page_tokens(self):
         svc = _service_mock()

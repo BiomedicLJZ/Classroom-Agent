@@ -56,6 +56,12 @@ NOTE: the Classroom API has no public comments on posts and no private comments.
 Grading feedback is delivered as a comment on the student's submitted Drive file
 via post_grade(feedback=...). For "comment on an assignment" requests, offer that
 or an announcement referencing the assignment.
+
+DRAFT WORKFLOW: announcements, assignments, and materials are created as DRAFT by
+default. Tell the instructor to review them in the Classroom UI and publish with
+update_assignment/update_announcement (state="PUBLISHED"), or create directly with
+state="PUBLISHED" when explicitly asked. scheduled_time ("YYYY-MM-DD HH:MM",
+Mexico City time) schedules automatic publication.
 """
 
 _GRADING_SUBAGENT_PROMPT = """\

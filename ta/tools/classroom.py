@@ -1,6 +1,8 @@
 # ta/tools/classroom.py
 import json
+from datetime import datetime
 from functools import cache
+from zoneinfo import ZoneInfo
 
 from googleapiclient.discovery import build
 from googleapiclient.errors import HttpError
@@ -9,6 +11,14 @@ from langgraph.types import interrupt
 
 from ta.google_auth import get_credentials
 from ta.session import get_active_account
+
+_LOCAL_TZ = ZoneInfo("America/Mexico_City")
+
+
+def _to_utc_rfc3339(local_str: str) -> str:
+    """'YYYY-MM-DD HH:MM' Mexico City local time → RFC3339 UTC string."""
+    local_dt = datetime.strptime(local_str, "%Y-%m-%d %H:%M").replace(tzinfo=_LOCAL_TZ)
+    return local_dt.astimezone(ZoneInfo("UTC")).strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
 def _http_error_msg(exc: HttpError, course_id: str = "", resource: str = "") -> str:
@@ -132,22 +142,34 @@ def get_submission(course_id: str, coursework_id: str, submission_id: str) -> st
 
 
 @tool
-def post_announcement(course_id: str, text: str) -> str:
-    """Post a plain-text announcement to a Google Classroom course. Requires confirmation."""
+def post_announcement(
+    course_id: str, text: str, state: str = "DRAFT", scheduled_time: str = ""
+) -> str:
+    """Post an announcement to a course. Created as DRAFT by default — review in the
+    Classroom UI and publish with update_announcement(state='PUBLISHED'), or pass
+    state='PUBLISHED' to go live immediately. scheduled_time ('YYYY-MM-DD HH:MM',
+    Mexico City local time) schedules automatic publication (state stays DRAFT until
+    then, per API rules). Requires confirmation."""
+    body: dict = {"text": text, "state": state.upper()}
+    when = ""
+    if scheduled_time:
+        body["scheduledTime"] = _to_utc_rfc3339(scheduled_time)
+        body["state"] = "DRAFT"
+        when = f"\nScheduled: {scheduled_time} local → publishes automatically"
     confirmed = interrupt({
         "action": "post_announcement",
-        "details": f"Post announcement to course {course_id}:\n\n{text}",
+        "details": f"Post announcement ({body['state']}) to course {course_id}{when}:\n\n{text}",
     })
     if not confirmed:
         return "Announcement posting cancelled."
     svc = _classroom_service(get_active_account())
     try:
         result = svc.courses().announcements().create(
-            courseId=course_id, body={"text": text, "state": "PUBLISHED"}
+            courseId=course_id, body=body
         ).execute()
     except HttpError as exc:
         return _http_error_msg(exc, course_id=course_id)
-    return f"Announcement posted (id: {result['id']})."
+    return f"Announcement posted (id: {result['id']}, state: {body['state']})."
 
 
 @tool
@@ -159,24 +181,20 @@ def create_assignment(
     due_date: str,
     due_time: str,
     materials_drive_ids: list[str],
+    state: str = "DRAFT",
+    scheduled_time: str = "",
 ) -> str:
-    """Create a new assignment in a Google Classroom course. Requires confirmation.
+    """Create a new assignment in a Google Classroom course. Created as DRAFT by
+    default — review in the Classroom UI and publish with
+    update_assignment(state='PUBLISHED'), or pass state='PUBLISHED' to go live now.
+    scheduled_time ('YYYY-MM-DD HH:MM', Mexico City local time) schedules automatic
+    publication (state stays DRAFT until then). Requires confirmation.
     due_date: YYYY-MM-DD format. due_time: HH:MM (24h)."""
-    confirmed = interrupt({
-        "action": "create_assignment",
-        "details": (
-            f"Create assignment '{title}' in course {course_id}\n"
-            f"Max points: {max_points}, Due: {due_date} {due_time}\n\n"
-            f"Description:\n{description}"
-        ),
-    })
-    if not confirmed:
-        return "Assignment creation cancelled."
     year, month, day = map(int, due_date.split("-"))
     hour, minute = map(int, due_time.split(":"))
     body: dict = {
         "title": title, "description": description, "maxPoints": max_points,
-        "workType": "ASSIGNMENT", "state": "PUBLISHED",
+        "workType": "ASSIGNMENT", "state": state.upper(),
         "dueDate": {"year": year, "month": month, "day": day},
         "dueTime": {"hours": hour, "minutes": minute},
     }
@@ -185,6 +203,21 @@ def create_assignment(
             {"driveFile": {"driveFile": {"id": fid}, "shareMode": "VIEW"}}
             for fid in materials_drive_ids
         ]
+    when = ""
+    if scheduled_time:
+        body["scheduledTime"] = _to_utc_rfc3339(scheduled_time)
+        body["state"] = "DRAFT"
+        when = f"\nScheduled: {scheduled_time} local → publishes automatically"
+    confirmed = interrupt({
+        "action": "create_assignment",
+        "details": (
+            f"Create assignment '{title}' ({body['state']}) in course {course_id}\n"
+            f"Max points: {max_points}, Due: {due_date} {due_time}{when}\n\n"
+            f"Description:\n{description}"
+        ),
+    })
+    if not confirmed:
+        return "Assignment creation cancelled."
     svc = _classroom_service(get_active_account())
     try:
         result = svc.courses().courseWork().create(courseId=course_id, body=body).execute()
@@ -258,12 +291,15 @@ def create_material(
     drive_file_ids: list[str],
     youtube_urls: list[str],
     link_urls: list[str],
+    state: str = "DRAFT",
 ) -> str:
-    """Post study materials (Drive files, YouTube, links) to a course. Requires confirmation."""
+    """Post study materials (Drive files, YouTube, links) to a course. Created as
+    DRAFT by default — review in the Classroom UI and publish with
+    update_material, or pass state='PUBLISHED' to go live now. Requires confirmation."""
     confirmed = interrupt({
         "action": "create_material",
         "details": (
-            f"Post material '{title}' to course {course_id}\n\n"
+            f"Post material '{title}' ({state.upper()}) to course {course_id}\n\n"
             f"Description:\n{description}"
         ),
     })
@@ -285,7 +321,7 @@ def create_material(
                 "title": title,
                 "description": description,
                 "materials": materials,
-                "state": "PUBLISHED",
+                "state": state.upper(),
             },
         ).execute()
     except HttpError as exc:
