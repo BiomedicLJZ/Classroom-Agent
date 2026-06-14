@@ -1,7 +1,6 @@
 # ta/agent.py
 from deepagents import SubAgent, create_deep_agent
 from langchain_nvidia_ai_endpoints import ChatNVIDIA
-from langgraph.checkpoint.memory import InMemorySaver
 
 from ta.config import Settings
 from ta.state import TAState
@@ -73,7 +72,14 @@ Do NOT post grades — that is the main agent's responsibility after instructor 
 """
 
 
-def build_agent(settings: Settings):
+def build_agent(settings: Settings, checkpointer=None):
+    if checkpointer is None:
+        import sqlite3
+
+        from langgraph.checkpoint.sqlite import SqliteSaver
+        checkpointer = SqliteSaver(
+            sqlite3.connect("checkpoints.db", check_same_thread=False)
+        )
     llm = ChatNVIDIA(
         model=settings.nvidia_model,
         api_key=settings.nvidia_api_key,
@@ -111,6 +117,6 @@ def build_agent(settings: Settings):
         tools=ALL_TOOLS,
         state_schema=TAState,
         system_prompt=SYSTEM_PROMPT,
-        checkpointer=InMemorySaver(),
+        checkpointer=checkpointer,
         subagents=[grading_subagent],
     )

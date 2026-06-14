@@ -1,5 +1,6 @@
 # main.py
-import uuid
+import argparse
+from datetime import date
 
 from ta.agent import build_agent
 from ta.cli import run_repl
@@ -8,10 +9,18 @@ from ta.google_auth import get_credentials
 
 
 def main() -> None:
+    parser = argparse.ArgumentParser(description="Classroom TA Agent")
+    parser.add_argument(
+        "--thread",
+        default=f"cli-{date.today().isoformat()}",
+        help="Conversation thread id (default: one per day, resumes within the day)",
+    )
+    args = parser.parse_args()
+
     settings = Settings()
     get_credentials("cugdl")
     graph = build_agent(settings)
-    run_repl(graph, {"configurable": {"thread_id": str(uuid.uuid4())}})
+    run_repl(graph, {"configurable": {"thread_id": args.thread}})
 
 
 if __name__ == "__main__":
