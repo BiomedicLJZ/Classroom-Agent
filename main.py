@@ -6,7 +6,7 @@ from datetime import date
 from langgraph.checkpoint.sqlite import SqliteSaver
 
 from ta.agent import build_agent
-from ta.cli import run_repl
+from ta.cli import render_startup_banner, run_repl
 from ta.config import Settings
 from ta.google_auth import get_credentials
 
@@ -33,6 +33,7 @@ def main() -> None:
         make_graph,
         {"configurable": {"thread_id": args.thread}},
         initial_thinking=settings.nvidia_enable_thinking,
+        on_start=render_startup_banner,
     )
 
 

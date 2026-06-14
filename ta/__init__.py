@@ -14,5 +14,12 @@ _NVIDIA_WARNING_PATTERNS = (
     r".*type is unknown and inference may fail.*",
 )
 
-for _pattern in _NVIDIA_WARNING_PATTERNS:
-    warnings.filterwarnings("ignore", message=_pattern)
+
+def _install_nvidia_warning_filters() -> None:
+    """Register ignore-filters for the noisy NVIDIA integration warnings. Idempotent
+    — safe to call again after a framework (e.g. pytest) resets warnings.filters."""
+    for _pattern in _NVIDIA_WARNING_PATTERNS:
+        warnings.filterwarnings("ignore", message=_pattern)
+
+
+_install_nvidia_warning_filters()

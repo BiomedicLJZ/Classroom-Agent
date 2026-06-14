@@ -156,6 +156,28 @@ class TestRunRepl:
         assert isinstance(cmd, Command) and cmd.resume == {"i1": True, "i2": True}
 
 
+class TestStartupBanner:
+    def test_render_startup_banner_lists_courses(self, capsys):
+        from ta import cli
+        svc = MagicMock()
+        svc.courses().list().execute.return_value = {
+            "courses": [{"id": "C9", "name": "IA", "section": "B"}]
+        }
+        with patch("ta.tools.classroom._classroom_service", return_value=svc), \
+             patch("ta.session.get_active_account", return_value="cugdl"):
+            cli.render_startup_banner()
+        out = capsys.readouterr().out
+        assert "C9" in out and "IA" in out
+
+    def test_render_startup_banner_degrades_on_error(self, capsys):
+        from ta import cli
+        with patch("ta.tools.classroom._classroom_service",
+                   side_effect=RuntimeError("no creds")):
+            cli.render_startup_banner()  # must not raise
+        out = capsys.readouterr().out
+        assert "Could not load courses" in out
+
+
 class TestThinkToggle:
     def test_think_off_rebuilds_graph_and_routes_next_turn(self):
         built = []

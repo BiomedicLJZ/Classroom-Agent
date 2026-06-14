@@ -9,12 +9,40 @@ from rich.console import Console
 from rich.live import Live
 from rich.markdown import Markdown
 from rich.panel import Panel
+from rich.table import Table
+from rich.text import Text
+from rich.theme import Theme
 
-console = Console()
+# Higher-contrast Markdown palette for the terminal: coloured headings, bright
+# inline code, underlined links, subtle rules. Code blocks use the monokai theme
+# (set per-Markdown below).
+_THEME = Theme({
+    "markdown.h1": "bold bright_white on grey23",
+    "markdown.h2": "bold bright_cyan",
+    "markdown.h3": "bold cyan",
+    "markdown.h4": "bold blue",
+    "markdown.item.bullet": "bold yellow",
+    "markdown.item.number": "bold yellow",
+    "markdown.link": "underline bright_blue",
+    "markdown.link_url": "blue",
+    "markdown.code": "bold bright_green on grey15",
+    "markdown.block_quote": "italic grey70",
+    "markdown.hr": "grey39",
+    "repr.url": "underline bright_blue",
+})
+
+console = Console(theme=_THEME)
 
 # Node names of the main deep-agent loop; anything else (subagents, tool-internal
 # LLM calls) gets a visible [node] tag so the instructor knows who is talking.
 _MAIN_NODES = {"agent", "model"}
+
+
+def _md(text: str) -> Markdown:
+    """Markdown with syntax-highlighted code blocks and clickable links."""
+    return Markdown(
+        text, code_theme="monokai", inline_code_theme="monokai", hyperlinks=True
+    )
 
 
 def _chunk_reasoning(chunk: AIMessageChunk) -> str:
@@ -51,6 +79,7 @@ class StreamRenderer:
         self.section: str | None = None  # None | "thinking" | "answer"
         self.streamed_answer = False  # any answer tokens shown this turn
         self._answer_buf = ""
+        self._answer_title = "💬 TA Agent"
         self._live: Live | None = None
 
     def on_chunk(self, chunk: AIMessageChunk, metadata: dict | None) -> None:
@@ -72,18 +101,27 @@ class StreamRenderer:
         if text:
             if self.section != "answer":
                 self._close_current()
-                console.print(f"\n💬 {tag}TA Agent", style="bold blue", markup=False)
                 self.section = "answer"
                 self._answer_buf = ""
+                self._answer_title = f"💬 {tag}TA Agent"
                 self._live = Live(
-                    Markdown(""), console=console,
+                    self._answer_panel(), console=console,
                     refresh_per_second=8, vertical_overflow="visible",
                 )
                 self._live.start()
             self.streamed_answer = True
             self._answer_buf += text
             if self._live is not None:
-                self._live.update(Markdown(self._answer_buf))
+                self._live.update(self._answer_panel())
+
+    def _answer_panel(self) -> Panel:
+        return Panel(
+            _md(self._answer_buf),
+            title=Text(self._answer_title, style="bold blue"),
+            title_align="left",
+            border_style="blue",
+            padding=(0, 1),
+        )
 
     def _close_current(self) -> None:
         if self.section == "answer" and self._live is not None:
@@ -119,7 +157,10 @@ def _handle_update(payload: dict, renderer: StreamRenderer) -> None:
                 and content.strip()
             ):
                 renderer.finish()
-                console.print(Markdown(content))
+                console.print(Panel(
+                    _md(content), title=Text("💬 TA Agent", style="bold blue"),
+                    title_align="left", border_style="blue", padding=(0, 1),
+                ))
 
 
 def _prompt_confirmations(interrupts) -> dict:
@@ -163,25 +204,66 @@ def _prompt_confirmations(interrupts) -> dict:
     return resume_values
 
 
-def run_repl(make_graph: Callable, config: dict, initial_thinking: bool = True) -> None:
+def render_startup_banner() -> None:
+    """Best-effort: list the active account's courses with their IDs at launch so
+    the instructor always has the IDs handy. Silently degrades on any error."""
+    try:
+        from ta.session import get_active_account
+        from ta.tools.classroom import _classroom_service, _collect_pages
+        svc = _classroom_service(get_active_account())
+        courses = _collect_pages(
+            lambda tok: svc.courses().list(courseStates=["ACTIVE"], pageToken=tok),
+            "courses",
+        )
+    except Exception as exc:  # noqa: BLE001 — banner is non-critical
+        console.print(f"[dim]Could not load courses: {exc}[/dim]")
+        return
+    if not courses:
+        console.print("[dim]No active courses found for the current account.[/dim]")
+        return
+    table = Table(
+        title="📚 Your active courses", title_style="bold green",
+        border_style="grey39", header_style="bold cyan", expand=False,
+    )
+    table.add_column("Course ID", style="bright_yellow", no_wrap=True)
+    table.add_column("Name", style="white")
+    table.add_column("Section", style="grey70")
+    for c in courses:
+        table.add_row(str(c.get("id", "")), c.get("name", "Unnamed"), c.get("section", ""))
+    console.print(table)
+    console.print(
+        "[dim]Use a Course ID above, or ask me to list IDs for a course to get "
+        "students / assignments / topics.[/dim]"
+    )
+
+
+def run_repl(
+    make_graph: Callable, config: dict, initial_thinking: bool = True,
+    on_start: Callable | None = None,
+) -> None:
     """Interactive REPL. make_graph(thinking: bool) builds the agent graph — the
     /think command rebuilds it against the same checkpointer, so the conversation
-    thread continues with reasoning toggled."""
+    thread continues with reasoning toggled. on_start() runs once after the welcome
+    panel (used to show the course-ID banner)."""
     thinking = initial_thinking
     graph = make_graph(thinking)
     session = PromptSession(history=FileHistory(".ta_history"))
 
+    reasoning_state = "on" if initial_thinking else "off"
     console.print(Panel(
         "[bold green]Classroom TA Agent[/bold green] ready.\n"
         "Type your request and press Enter. Type [bold]exit[/bold] to quit.\n"
-        "Raw model reasoning streams in grey; answers render as Markdown.\n"
-        "[bold]/think on|off[/bold] toggles model reasoning.\n\n"
+        "Answers render as rich Markdown (tables, code, links).\n"
+        f"[bold]/think on|off[/bold] toggles model reasoning (now [bold]{reasoning_state}[/bold]); "
+        "raw reasoning streams in grey when on.\n\n"
         "[dim]Examples:[/dim]\n"
         "  List my courses\n"
         "  Grade all submissions for assignment 987 using rubric rubrics/hw1.yaml\n"
         "  Post announcement: 'Midterm next Friday at 10am'",
         title="Welcome", border_style="green",
     ))
+    if on_start is not None:
+        on_start()
 
     while True:
         try:

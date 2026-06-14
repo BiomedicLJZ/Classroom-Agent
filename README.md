@@ -150,11 +150,25 @@ Cloud project first (see Setup step 2).
 
 ## Reasoning & streaming
 
-- Nemotron 3 Ultra thinking is ON by default. Raw reasoning streams in dim grey
-  before each answer. Tune via `.env`: `NVIDIA_TEMPERATURE`, `NVIDIA_TOP_P`,
-  `NVIDIA_MAX_TOKENS`, `NVIDIA_REASONING_BUDGET`, `NVIDIA_ENABLE_THINKING`.
+- Nemotron 3 Ultra thinking is **OFF by default** (faster replies). Turn it on for a
+  session with `/think on`, or default it on with `NVIDIA_ENABLE_THINKING=true` in
+  `.env`. When on, raw reasoning streams in dim grey before each answer.
+- Tune via `.env`: `NVIDIA_TEMPERATURE`, `NVIDIA_TOP_P`, `NVIDIA_MAX_TOKENS`,
+  `NVIDIA_REASONING_BUDGET`, `NVIDIA_ENABLE_THINKING`.
+- Answers render as rich Markdown — coloured headings, monokai-highlighted code
+  blocks, bordered tables, clickable links — inside a subtle answer panel.
+- Noisy NVIDIA integration warnings (non-default kwargs, `max_tokens` deprecation,
+  unknown model type) are silenced for clean output.
 - Every student-facing text you type is improved/rewritten before posting; the
   confirmation prompt shows the full final text.
+
+## Course & object IDs
+
+- On launch the CLI shows a table of your active courses **with their IDs** so you
+  never have to guess one.
+- Ask the agent for IDs anytime — it calls `list_course_ids()` (all courses) or
+  `list_course_ids(course_id=...)` to dump that course's students, assignments, and
+  topics, each with its raw ID. The agent resolves IDs itself before any operation.
 
 ## Memoria, comandos y flujo de publicación
 
