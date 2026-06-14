@@ -162,6 +162,14 @@ Cloud project first (see Setup step 2).
 - Every student-facing text you type is improved/rewritten before posting; the
   confirmation prompt shows the full final text.
 
+## Slash commands & help
+
+- Type `/` for an autocomplete dropdown of slash commands.
+- `/help` shows all slash commands plus the agent's capability modules (courses,
+  roster, assignments, announcements, materials, topics, grading, drive, office,
+  accounts). `/help <module>` shows that module's actions with example phrasings.
+- `/think on|off` toggles model reasoning. `exit` quits.
+
 ## Course & object IDs
 
 - On launch the CLI shows a table of your active courses **with their IDs** so you

@@ -178,6 +178,57 @@ class TestStartupBanner:
         assert "Could not load courses" in out
 
 
+class TestSlashCompleter:
+    def _complete(self, text):
+        from prompt_toolkit.completion import CompleteEvent
+        from prompt_toolkit.document import Document
+
+        from ta.cli import SlashCompleter
+        doc = Document(text, len(text))
+        return [c.text for c in SlashCompleter().get_completions(doc, CompleteEvent())]
+
+    def test_suggests_think_commands(self):
+        texts = self._complete("/th")
+        assert "/think on" in texts and "/think off" in texts
+
+    def test_suggests_help(self):
+        assert "/help" in self._complete("/he")
+
+    def test_suggests_modules_after_help(self):
+        assert "grading" in self._complete("/help gr")
+
+    def test_no_completion_for_plain_text(self):
+        assert self._complete("list my courses") == []
+
+
+class TestHelp:
+    def test_general_help_lists_modules_and_commands(self, capsys):
+        from ta.cli import render_help
+        render_help("")
+        out = capsys.readouterr().out
+        assert "grading" in out and "/think" in out and "/help" in out
+
+    def test_module_help_detail(self, capsys):
+        from ta.cli import render_help
+        render_help("grading")
+        out = capsys.readouterr().out.lower()
+        assert "rubric" in out or "grade" in out
+
+    def test_unknown_module(self, capsys):
+        from ta.cli import render_help
+        render_help("zzz")
+        out = capsys.readouterr().out.lower()
+        assert "unknown" in out
+
+
+class TestHelpCommand:
+    def test_help_command_does_not_call_graph(self, capsys):
+        mock_graph = MagicMock()
+        _run(mock_graph, ["/help", "exit"])
+        mock_graph.stream.assert_not_called()
+        assert "grading" in capsys.readouterr().out
+
+
 class TestThinkToggle:
     def test_think_off_rebuilds_graph_and_routes_next_turn(self):
         built = []

@@ -1,9 +1,12 @@
 # ta/cli.py
+import contextlib
+import sys
 from collections.abc import Callable
 
 from langchain_core.messages import AIMessageChunk, HumanMessage
 from langgraph.types import Command
 from prompt_toolkit import PromptSession
+from prompt_toolkit.completion import Completer, Completion
 from prompt_toolkit.history import FileHistory
 from rich.console import Console
 from rich.live import Live
@@ -30,6 +33,11 @@ _THEME = Theme({
     "markdown.hr": "grey39",
     "repr.url": "underline bright_blue",
 })
+
+# Render emoji / box-drawing on legacy Windows code pages (cp1252) instead of
+# raising UnicodeEncodeError. Must run before the Console reads the stream encoding.
+with contextlib.suppress(AttributeError, ValueError):
+    sys.stdout.reconfigure(encoding="utf-8", errors="replace")
 
 console = Console(theme=_THEME)
 
@@ -204,6 +212,126 @@ def _prompt_confirmations(interrupts) -> dict:
     return resume_values
 
 
+# Slash commands and the natural-language capability "modules" the agent exposes.
+# Used for both autocomplete and /help.
+_SLASH_COMMANDS = {
+    "/help": "Show help; use /help <module> for a capability area",
+    "/think on": "Enable model reasoning (slower; shows raw thinking)",
+    "/think off": "Disable model reasoning (faster)",
+}
+
+_MODULE_HELP: dict[str, tuple[str, list[str]]] = {
+    "courses": ("📚 Courses", [
+        "See every course with its ID, or dump one course's object IDs.",
+        'Ask: "list my courses" · "list IDs for course 9202"',
+    ]),
+    "roster": ("🎓 Roster", [
+        "List students, invite users, manage pending invitations.",
+        'Ask: "who is in course 9202" · "invite ana@x.mx as student to 9202"',
+    ]),
+    "assignments": ("📝 Assignments", [
+        "Create / update / delete assignments and check submission status.",
+        'Ask: "create an assignment about linked lists due Friday in 9202"',
+    ]),
+    "announcements": ("📢 Announcements", [
+        "Post / edit / delete announcements (DRAFT by default; can schedule).",
+        'Ask: "announce the midterm is next Friday 10am in 9202"',
+    ]),
+    "materials": ("📎 Materials", [
+        "Post / edit / delete study materials (Drive files, links, videos).",
+        'Ask: "post the slides drive:<id> to course 9202"',
+    ]),
+    "topics": ("🗂 Topics", [
+        "List or create topics to organize the class stream.",
+        'Ask: "create a topic \'Unit 3\' in 9202"',
+    ]),
+    "grading": ("✅ Grading", [
+        "Grade submissions against a YAML rubric, post grades with Drive feedback,",
+        "export grades to xlsx, or bulk-import grades from xlsx.",
+        'Ask: "grade assignment 987 in 9202 with rubric rubrics/hw1.yaml"',
+    ]),
+    "drive": ("📁 Drive & Docs", [
+        "Read submitted files, comment on Google Docs, upload files.",
+        'Ask: "read the file drive:<id>"',
+    ]),
+    "office": ("📊 Office files", [
+        "Read/write local .docx, .xlsx and .pptx for reports and bulk actions.",
+        'Ask: "invite every student in D:/roster.xlsx to course 9202"',
+    ]),
+    "accounts": ("🔑 Accounts", [
+        "Switch between the cugdl and uniat Google accounts.",
+        'Ask: "switch to uniat" · "which account am I using"',
+    ]),
+}
+
+
+class SlashCompleter(Completer):
+    """Autocomplete for slash commands. After '/help ' it completes module names."""
+
+    def get_completions(self, document, complete_event):
+        text = document.text_before_cursor
+        if not text.startswith("/"):
+            return
+        if text.startswith("/help "):
+            partial = text[len("/help "):].lstrip()
+            for module in _MODULE_HELP:
+                if module.startswith(partial):
+                    yield Completion(
+                        module, start_position=-len(partial),
+                        display=module, display_meta="help topic",
+                    )
+            return
+        for cmd, desc in _SLASH_COMMANDS.items():
+            if cmd.startswith(text):
+                yield Completion(
+                    cmd, start_position=-len(text), display=cmd, display_meta=desc
+                )
+
+
+def render_help(arg: str = "") -> None:
+    """Render help. Empty arg → slash commands + capability modules; a module name →
+    that module's detail; anything else → an 'unknown topic' note."""
+    arg = arg.strip().lower()
+    if arg:
+        if arg not in _MODULE_HELP:
+            console.print(
+                f"[yellow]Unknown help topic '{arg}'.[/yellow] "
+                f"Available: {', '.join(_MODULE_HELP)}"
+            )
+            return
+        title, lines = _MODULE_HELP[arg]
+        console.print(Panel(
+            _md("\n".join(lines)), title=Text(title, style="bold cyan"),
+            title_align="left", border_style="cyan", padding=(0, 1),
+        ))
+        return
+
+    cmd_table = Table(
+        title="⌨ Slash commands", title_style="bold green",
+        border_style="grey39", header_style="bold cyan",
+    )
+    cmd_table.add_column("Command", style="bright_yellow", no_wrap=True)
+    cmd_table.add_column("What it does", style="white")
+    for cmd, desc in _SLASH_COMMANDS.items():
+        cmd_table.add_row(cmd, desc)
+    cmd_table.add_row("exit", "Quit the agent")
+    console.print(cmd_table)
+
+    mod_table = Table(
+        title="🧩 Capability modules — /help <module> for detail",
+        title_style="bold green", border_style="grey39", header_style="bold cyan",
+    )
+    mod_table.add_column("Module", style="bright_yellow", no_wrap=True)
+    mod_table.add_column("Summary", style="white")
+    for module, (_title, lines) in _MODULE_HELP.items():
+        mod_table.add_row(module, lines[0])
+    console.print(mod_table)
+    console.print(
+        "[dim]Type what you want in plain language — the agent resolves IDs and "
+        "drafts content for you.[/dim]"
+    )
+
+
 def render_startup_banner() -> None:
     """Best-effort: list the active account's courses with their IDs at launch so
     the instructor always has the IDs handy. Silently degrades on any error."""
@@ -247,13 +375,19 @@ def run_repl(
     panel (used to show the course-ID banner)."""
     thinking = initial_thinking
     graph = make_graph(thinking)
-    session = PromptSession(history=FileHistory(".ta_history"))
+    session = PromptSession(
+        history=FileHistory(".ta_history"),
+        completer=SlashCompleter(),
+        complete_while_typing=True,
+    )
 
     reasoning_state = "on" if initial_thinking else "off"
     console.print(Panel(
         "[bold green]Classroom TA Agent[/bold green] ready.\n"
         "Type your request and press Enter. Type [bold]exit[/bold] to quit.\n"
         "Answers render as rich Markdown (tables, code, links).\n"
+        "Type [bold]/[/bold] for command autocomplete; [bold]/help[/bold] lists everything "
+        "([bold]/help <module>[/bold] for detail).\n"
         f"[bold]/think on|off[/bold] toggles model reasoning (now [bold]{reasoning_state}[/bold]); "
         "raw reasoning streams in grey when on.\n\n"
         "[dim]Examples:[/dim]\n"
@@ -277,6 +411,9 @@ def run_repl(
         if user_input.lower() in ("exit", "quit", "q"):
             console.print("[dim]Goodbye.[/dim]")
             break
+        if user_input.lower() == "/help" or user_input.lower().startswith("/help "):
+            render_help(user_input[len("/help"):])
+            continue
         if user_input.lower() in ("/think on", "/think off"):
             thinking = user_input.lower().endswith("on")
             graph = make_graph(thinking)
