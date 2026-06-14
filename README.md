@@ -156,6 +156,20 @@ Cloud project first (see Setup step 2).
 - Every student-facing text you type is improved/rewritten before posting; the
   confirmation prompt shows the full final text.
 
+## Memoria, comandos y flujo de publicación
+
+- La conversación persiste en `checkpoints.db` (SQLite); hilo por día por defecto,
+  `--thread NOMBRE` para hilos con nombre.
+- `/think on|off` alterna el razonamiento del modelo sin reiniciar ni perder la conversación.
+- Los posts se crean como **borrador** por defecto — revisa en la UI de Classroom y
+  publica con `update_*` (`state="PUBLISHED"`), o pide publicación inmediata.
+- `scheduled_time` ("YYYY-MM-DD HH:MM", hora de Ciudad de México) programa la
+  publicación automática.
+- Las respuestas se renderizan como Markdown (tablas, listas, código) en vivo.
+- El feedback de calificaciones se entrega como comentario en el archivo Drive
+  entregado (`post_grade(feedback=...)` / columna `Feedback` de `import_grades`).
+- El historial del prompt se guarda en `.ta_history` (flechas ↑/↓).
+
 ## Tech stack
 
 | Component | Library |

@@ -95,7 +95,8 @@ class TestGetCredentials:
             patch("ta.google_auth.Request"),
             patch("ta.google_auth.InstalledAppFlow") as mock_flow_cls,
         ):
-            mock_flow_cls.from_client_secrets_file.return_value.run_local_server.return_value = fresh
+            flow = mock_flow_cls.from_client_secrets_file.return_value
+            flow.run_local_server.return_value = fresh
             self._mock_settings(mock_settings_cls, "fake_secret.json", str(token_file))
             creds = get_credentials("cugdl")
 
