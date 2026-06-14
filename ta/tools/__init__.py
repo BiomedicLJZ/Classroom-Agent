@@ -31,7 +31,6 @@ from ta.tools.grading import (
     export_grades,
     load_rubric,
     post_grade,
-    post_private_comment,
 )
 from ta.tools.office import (
     append_excel_rows,
@@ -80,7 +79,6 @@ ALL_TOOLS = [
     analyze_submission,
     batch_grade_assignment,
     post_grade,
-    post_private_comment,
     export_grades,
     # Drive
     get_drive_file_text,

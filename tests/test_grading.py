@@ -39,6 +39,54 @@ class TestGradingLLM:
         assert '"score": 5.0' in result
 
 
+class TestPostGradeFeedback:
+    def _svc_with_submission(self, with_file=True):
+        sub = {"id": "sub1", "userId": "s1"}
+        if with_file:
+            sub["assignmentSubmission"] = {
+                "attachments": [{"driveFile": {"id": "file9"}}]
+            }
+        svc = MagicMock()
+        (svc.courses().courseWork().studentSubmissions()
+         .list().execute.return_value) = {"studentSubmissions": [sub]}
+        return svc
+
+    def test_feedback_posted_to_drive_file(self):
+        svc = self._svc_with_submission(with_file=True)
+        drive = MagicMock()
+        with patch("ta.tools.grading.interrupt", return_value=True), \
+             patch("ta.tools.classroom._classroom_service", return_value=svc), \
+             patch("ta.tools.drive._drive_service", return_value=drive):
+            from ta.tools.grading import post_grade
+            result = post_grade.func(
+                course_id="c1", coursework_id="w1", student_id="s1",
+                score=9.0, feedback="Buen trabajo, revisa la sección 2.",
+            )
+        kwargs = drive.comments().create.call_args.kwargs
+        assert kwargs["fileId"] == "file9"
+        assert kwargs["body"]["content"] == "Buen trabajo, revisa la sección 2."
+        assert "Feedback posted" in result
+
+    def test_no_drive_file_reports_honestly(self):
+        svc = self._svc_with_submission(with_file=False)
+        drive = MagicMock()
+        with patch("ta.tools.grading.interrupt", return_value=True), \
+             patch("ta.tools.classroom._classroom_service", return_value=svc), \
+             patch("ta.tools.drive._drive_service", return_value=drive):
+            from ta.tools.grading import post_grade
+            result = post_grade.func(
+                course_id="c1", coursework_id="w1", student_id="s1",
+                score=9.0, feedback="Texto de feedback",
+            )
+        drive.comments().create.assert_not_called()
+        assert "NOT delivered" in result
+        assert "Texto de feedback" in result
+
+    def test_post_private_comment_removed(self):
+        from ta.tools import ALL_TOOLS
+        assert "post_private_comment" not in [t.name for t in ALL_TOOLS]
+
+
 class TestExportGrades:
     def test_exports_matrix_to_xlsx(self, tmp_path):
         svc = MagicMock()

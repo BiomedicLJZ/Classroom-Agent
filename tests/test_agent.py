@@ -57,4 +57,4 @@ class TestBuildAgent:
 
     def test_minimum_tool_count(self):
         from ta.tools import ALL_TOOLS
-        assert len(ALL_TOOLS) >= 43
+        assert len(ALL_TOOLS) >= 42

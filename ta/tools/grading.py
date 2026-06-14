@@ -89,67 +89,77 @@ def analyze_submission(submission_text: str, rubric_json: str, assignment_type: 
     return json.dumps(parsed, indent=2)
 
 
-@tool
-def post_grade(
-    course_id: str, coursework_id: str, student_id: str, score: float, private_comment: str
+def _deliver_feedback(submission: dict, feedback: str) -> str:
+    """Post feedback as a comment on the first Drive file of a submission."""
+    file_ids = [
+        a["driveFile"]["id"]
+        for a in submission.get("assignmentSubmission", {}).get("attachments", [])
+        if "driveFile" in a
+    ]
+    if not file_ids:
+        return f"Feedback NOT delivered (no Drive file attached); deliver manually:\n{feedback}"
+    from ta.tools.drive import _drive_service
+    drive_svc = _drive_service(get_active_account())
+    try:
+        drive_svc.comments().create(
+            fileId=file_ids[0], body={"content": feedback}, fields="id"
+        ).execute(num_retries=3)
+    except Exception as exc:
+        return f"Feedback NOT delivered ({exc}); deliver manually:\n{feedback}"
+    return "Feedback posted as a comment on the submitted Drive file."
+
+
+def _post_one_grade(
+    svc, course_id: str, coursework_id: str, student_id: str, score: float, feedback: str
 ) -> str:
-    """Post a numeric grade and private comment to a student's Classroom submission.
-    Requires instructor confirmation."""
-    confirmed = interrupt({
-        "action": "post_grade",
-        "details": (
-            f"Post grade {score} pts to student {student_id}\n"
-            f"Assignment: {coursework_id} in course {course_id}\n"
-            f"Comment: {private_comment[:120]}"
+    """Patch grade + return submission + deliver feedback. Shared by post_grade
+    and import_grades — caller is responsible for the confirmation gate."""
+    from ta.tools.classroom import _collect_pages
+    subs = _collect_pages(
+        lambda tok: svc.courses().courseWork().studentSubmissions().list(
+            courseId=course_id, courseWorkId=coursework_id,
+            userId=student_id, pageToken=tok,
         ),
-    })
-    if not confirmed:
-        return f"Grade for student {student_id} cancelled."
-
-    from googleapiclient.discovery import build
-
-    from ta.google_auth import get_credentials
-    creds = get_credentials(get_active_account())
-    svc = build("classroom", "v1", credentials=creds)
-
-    subs = (
-        svc.courses().courseWork().studentSubmissions()
-        .list(courseId=course_id, courseWorkId=coursework_id, userId=student_id)
-        .execute()
+        "studentSubmissions",
     )
-    submission_id = subs["studentSubmissions"][0]["id"]
+    if not subs:
+        return f"No submission found for student {student_id}."
+    submission = subs[0]
+    submission_id = submission["id"]
     svc.courses().courseWork().studentSubmissions().patch(
         courseId=course_id, courseWorkId=coursework_id, id=submission_id,
         updateMask="assignedGrade,draftGrade",
         body={"assignedGrade": score, "draftGrade": score},
-    ).execute()
+    ).execute(num_retries=3)
     svc.courses().courseWork().studentSubmissions().return_(
         courseId=course_id, courseWorkId=coursework_id, body={"ids": [submission_id]}
-    ).execute()
-    return f"Grade {score} posted for student {student_id} (submission {submission_id})."
+    ).execute(num_retries=3)
+    msg = f"Grade {score} posted for student {student_id} (submission {submission_id})."
+    if feedback:
+        msg += " " + _deliver_feedback(submission, feedback)
+    return msg
 
 
 @tool
-def post_private_comment(
-    course_id: str, coursework_id: str, submission_id: str, comment_text: str
+def post_grade(
+    course_id: str, coursework_id: str, student_id: str, score: float, feedback: str = ""
 ) -> str:
-    """Add a private comment to a student's Classroom submission. Requires confirmation."""
-    confirmed = interrupt({
-        "action": "post_private_comment",
-        "details": f"Add private comment to submission {submission_id}:\n{comment_text[:200]}",
-    })
+    """Post a numeric grade to a student's Classroom submission. feedback (optional)
+    is delivered as a comment on the student's submitted Drive file — the Classroom
+    API has no private comments. If the submission has no Drive attachment, the
+    feedback is returned for manual delivery. Requires instructor confirmation."""
+    details = (
+        f"Post grade {score} pts to student {student_id}\n"
+        f"Assignment: {coursework_id} in course {course_id}"
+    )
+    if feedback:
+        details += f"\n\nFeedback (goes to the submitted Drive file):\n{feedback}"
+    confirmed = interrupt({"action": "post_grade", "details": details})
     if not confirmed:
-        return "Private comment cancelled."
-    from googleapiclient.discovery import build
-
-    from ta.google_auth import get_credentials
-    creds = get_credentials(get_active_account())
-    svc = build("classroom", "v1", credentials=creds)
-    svc.courses().courseWork().studentSubmissions().modifyAttachments(
-        courseId=course_id, courseWorkId=coursework_id, id=submission_id,
-        body={"addAttachments": []},
-    ).execute()
-    return f"Private comment added to submission {submission_id}."
+        return f"Grade for student {student_id} cancelled."
+    from ta.tools.classroom import _classroom_service
+    svc = _classroom_service(get_active_account())
+    return _post_one_grade(svc, course_id, coursework_id, student_id, score, feedback)
 
 
 @tool

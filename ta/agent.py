@@ -53,9 +53,10 @@ and description, material description, grading feedback, and private comment:
 5. Expand rough notes into complete, polished content.
 Deliver the improved version through the API tool; the confirmation gate shows the
 full final text so the instructor approves with a single y/N.
-NOTE: the Classroom API has no public comments on posts. For "comment on an
-assignment" requests, offer post_private_comment per student or an announcement
-referencing the assignment.
+NOTE: the Classroom API has no public comments on posts and no private comments.
+Grading feedback is delivered as a comment on the student's submitted Drive file
+via post_grade(feedback=...). For "comment on an assignment" requests, offer that
+or an announcement referencing the assignment.
 """
 
 _GRADING_SUBAGENT_PROMPT = """\
