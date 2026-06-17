@@ -19,6 +19,8 @@ SCOPES = [
     "https://www.googleapis.com/auth/classroom.student-submissions.students.readonly",
     "https://www.googleapis.com/auth/drive",
     "https://www.googleapis.com/auth/documents",
+    "https://www.googleapis.com/auth/calendar.readonly",
+    "https://www.googleapis.com/auth/calendar.events",
 ]
 
 

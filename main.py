@@ -1,17 +1,18 @@
 # main.py
 import argparse
-import sqlite3
+import asyncio
 from datetime import date
 
-from langgraph.checkpoint.sqlite import SqliteSaver
+import aiosqlite
+from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
 
 from ta.agent import build_agent
-from ta.cli import render_startup_banner, run_repl
+from ta.cli import render_startup_banner, run_repl_async
 from ta.config import Settings
 from ta.google_auth import get_credentials
+from ta.session import get_active_account
 
-
-def main() -> None:
+async def main_async():
     parser = argparse.ArgumentParser(description="Classroom TA Agent")
     parser.add_argument(
         "--thread",
@@ -21,21 +22,24 @@ def main() -> None:
     args = parser.parse_args()
 
     settings = Settings()
-    get_credentials("cugdl")
-    checkpointer = SqliteSaver(
-        sqlite3.connect("checkpoints.db", check_same_thread=False)
-    )
+    get_credentials(get_active_account())
 
-    def make_graph(thinking: bool):
-        return build_agent(settings, checkpointer=checkpointer, enable_thinking=thinking)
+    async with aiosqlite.connect("checkpoints.db") as conn:
+        checkpointer = AsyncSqliteSaver(conn)
 
-    run_repl(
-        make_graph,
-        {"configurable": {"thread_id": args.thread}},
-        initial_thinking=settings.nvidia_enable_thinking,
-        on_start=render_startup_banner,
-    )
+        def make_graph(thinking: bool, provider: str | None = None):
+            return build_agent(settings, checkpointer=checkpointer, enable_thinking=thinking, provider=provider)
 
+        await run_repl_async(
+            make_graph,
+            {"configurable": {"thread_id": args.thread}},
+            initial_thinking=settings.nvidia_enable_thinking,
+            on_start=render_startup_banner,
+        )
+
+def main():
+    asyncio.run(main_async())
 
 if __name__ == "__main__":
     main()
+

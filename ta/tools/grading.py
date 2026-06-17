@@ -35,6 +35,13 @@ from the student's work. Do not include any text outside the JSON object."""
 @lru_cache(maxsize=1)
 def _get_llm():
     settings = Settings()
+    if settings.llm_provider == "google":
+        from langchain_google_genai import ChatGoogleGenerativeAI
+        return ChatGoogleGenerativeAI(
+            model=settings.google_model,
+            api_key=settings.google_api_key,
+            temperature=settings.google_temperature,
+        )
     return ChatNVIDIA(
         model=settings.nvidia_model,
         api_key=settings.nvidia_api_key,

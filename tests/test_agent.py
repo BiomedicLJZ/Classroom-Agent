@@ -28,12 +28,13 @@ class TestBuildAgent:
             assert kwargs["top_p"] == 0.95
             assert kwargs["max_tokens"] == 16384
             assert kwargs["reasoning_budget"] == 16384
-            assert kwargs["chat_template_kwargs"] == {"enable_thinking": False}
+            assert kwargs["chat_template_kwargs"] == {"enable_thinking": True}
 
     def test_prompts_have_no_legacy_thinking_toggle(self):
-        from ta.agent import _GRADING_SUBAGENT_PROMPT, SYSTEM_PROMPT
+        from ta.agent import SYSTEM_PROMPT
+        from ta.skills import grading
         assert "detailed thinking" not in SYSTEM_PROMPT.lower()
-        assert "detailed thinking" not in _GRADING_SUBAGENT_PROMPT.lower()
+        assert "detailed thinking" not in grading.PROMPT.lower()
 
     def test_system_prompt_has_rewrite_protocol(self):
         from ta.agent import SYSTEM_PROMPT
@@ -59,16 +60,15 @@ class TestBuildAgent:
             build_agent(Settings(), checkpointer=fake_cp)
             assert mock_create.call_args.kwargs["checkpointer"] is fake_cp
 
-    def test_build_agent_defaults_to_sqlite(self, monkeypatch, tmp_path):
+    def test_build_agent_defaults_to_memorysaver(self, monkeypatch, tmp_path):
         monkeypatch.setenv("NVIDIA_API_KEY", "nvapi-test")
-        monkeypatch.chdir(tmp_path)  # checkpoints.db lands in tmp, not the repo
         with patch("ta.agent.ChatNVIDIA"), \
              patch("ta.agent.create_deep_agent") as mock_create:
             from ta.agent import build_agent
             from ta.config import Settings
             build_agent(Settings())
-            from langgraph.checkpoint.sqlite import SqliteSaver
-            assert isinstance(mock_create.call_args.kwargs["checkpointer"], SqliteSaver)
+            from langgraph.checkpoint.memory import MemorySaver
+            assert isinstance(mock_create.call_args.kwargs["checkpointer"], MemorySaver)
 
     def test_all_tools_registered(self):
         from ta.tools import ALL_TOOLS

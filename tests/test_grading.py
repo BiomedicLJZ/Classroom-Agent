@@ -15,7 +15,7 @@ class TestGradingLLM:
             kwargs = mock_cls.call_args.kwargs
             assert kwargs["temperature"] == 1.0
             assert kwargs["reasoning_budget"] == 16384
-            assert kwargs["chat_template_kwargs"] == {"enable_thinking": False}
+            assert kwargs["chat_template_kwargs"] == {"enable_thinking": True}
         grading._get_llm.cache_clear()
 
     def test_grading_prompt_no_legacy_toggle(self):

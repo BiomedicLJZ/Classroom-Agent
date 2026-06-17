@@ -17,8 +17,21 @@ _LOCAL_TZ = ZoneInfo("America/Mexico_City")
 
 def _to_utc_rfc3339(local_str: str) -> str:
     """'YYYY-MM-DD HH:MM' Mexico City local time → RFC3339 UTC string."""
-    local_dt = datetime.strptime(local_str, "%Y-%m-%d %H:%M").replace(tzinfo=_LOCAL_TZ)
-    return local_dt.astimezone(ZoneInfo("UTC")).strftime("%Y-%m-%dT%H:%M:%SZ")
+    clean_str = local_str.replace("T", " ").strip()
+    for fmt in ("%Y-%m-%d %H:%M:%S", "%Y-%m-%d %H:%M", "%Y-%m-%d"):
+        try:
+            local_dt = datetime.strptime(clean_str, fmt)
+            if fmt == "%Y-%m-%d":
+                local_dt = local_dt.replace(hour=8, minute=0)
+            local_dt = local_dt.replace(tzinfo=_LOCAL_TZ)
+            return local_dt.astimezone(ZoneInfo("UTC")).strftime("%Y-%m-%dT%H:%M:%SZ")
+        except ValueError:
+            continue
+    raise ValueError(
+        f"Could not parse scheduled_time '{local_str}'. "
+        f"Please use 'YYYY-MM-DD HH:MM' format."
+    )
+
 
 
 def _http_error_msg(exc: HttpError, course_id: str = "", resource: str = "") -> str:
@@ -54,16 +67,26 @@ def _collect_pages(make_request, items_key: str) -> list:
             return items
 
 
-@tool
-def list_courses() -> str:
-    """List all active Google Classroom courses the authenticated user has access to."""
-    svc = _classroom_service(get_active_account())
-    response = svc.courses().list(courseStates=["ACTIVE"]).execute()
-    courses = response.get("courses", [])
+def _format_course_list(courses: list) -> str:
     if not courses:
         return "No active courses found."
-    lines = [f"- [{c['id']}] {c.get('name', 'Unnamed')} — {c.get('section', '')}" for c in courses]
-    return "Active courses:\n" + "\n".join(lines)
+    lines = [
+        f"  - ID: {c['id']} | Name: {c.get('name', 'Unnamed')} | Section: {c.get('section', '')}"
+        for c in courses
+    ]
+    return "\n".join(lines)
+
+
+@tool
+def list_courses() -> str:
+    """List all active Google Classroom courses the authenticated user has access to.
+    Use this to find a course's ID by its name."""
+    svc = _classroom_service(get_active_account())
+    courses = _collect_pages(
+        lambda tok: svc.courses().list(courseStates=["ACTIVE"], pageToken=tok),
+        "courses",
+    )
+    return "Active courses:\n" + _format_course_list(courses)
 
 
 @tool
@@ -183,13 +206,14 @@ def create_assignment(
     materials_drive_ids: list[str],
     state: str = "DRAFT",
     scheduled_time: str = "",
+    topic_id: str = "",
 ) -> str:
     """Create a new assignment in a Google Classroom course. Created as DRAFT by
     default — review in the Classroom UI and publish with
     update_assignment(state='PUBLISHED'), or pass state='PUBLISHED' to go live now.
     scheduled_time ('YYYY-MM-DD HH:MM', Mexico City local time) schedules automatic
-    publication (state stays DRAFT until then). Requires confirmation.
-    due_date: YYYY-MM-DD format. due_time: HH:MM (24h)."""
+    publication (state stays DRAFT until then). topic_id assigns it to a topic.
+    Requires confirmation. due_date: YYYY-MM-DD format. due_time: HH:MM (24h)."""
     year, month, day = map(int, due_date.split("-"))
     hour, minute = map(int, due_time.split(":"))
     body: dict = {
@@ -198,6 +222,8 @@ def create_assignment(
         "dueDate": {"year": year, "month": month, "day": day},
         "dueTime": {"hours": hour, "minutes": minute},
     }
+    if topic_id:
+        body["topicId"] = topic_id
     if materials_drive_ids:
         body["materials"] = [
             {"driveFile": {"driveFile": {"id": fid}, "shareMode": "VIEW"}}
@@ -292,10 +318,12 @@ def create_material(
     youtube_urls: list[str],
     link_urls: list[str],
     state: str = "DRAFT",
+    topic_id: str = "",
 ) -> str:
     """Post study materials (Drive files, YouTube, links) to a course. Created as
     DRAFT by default — review in the Classroom UI and publish with
-    update_material, or pass state='PUBLISHED' to go live now. Requires confirmation."""
+    update_material, or pass state='PUBLISHED' to go live now. topic_id assigns
+    it to a topic. Requires confirmation."""
     confirmed = interrupt({
         "action": "create_material",
         "details": (
@@ -315,14 +343,17 @@ def create_material(
         materials.append({"link": {"url": url}})
     svc = _classroom_service(get_active_account())
     try:
+        body = {
+            "title": title,
+            "description": description,
+            "materials": materials,
+            "state": state.upper(),
+        }
+        if topic_id:
+            body["topicId"] = topic_id
         result = svc.courses().courseWorkMaterials().create(
             courseId=course_id,
-            body={
-                "title": title,
-                "description": description,
-                "materials": materials,
-                "state": state.upper(),
-            },
+            body=body,
         ).execute()
     except HttpError as exc:
         return _http_error_msg(exc, course_id=course_id)
@@ -606,13 +637,9 @@ def list_course_ids(course_id: str = "") -> str:
         )
         if not courses:
             return "No active courses found."
-        lines = [
-            f"- [{c['id']}] {c.get('name', 'Unnamed')} — {c.get('section', '')}"
-            for c in courses
-        ]
         return (
-            "Active courses (pass a course ID back to dump its object IDs):\n"
-            + "\n".join(lines)
+            "Active courses (use a Course ID below to dump its internal object IDs):\n"
+            + _format_course_list(courses)
         )
 
     try:
@@ -631,17 +658,17 @@ def list_course_ids(course_id: str = "") -> str:
     except HttpError as exc:
         return _http_error_msg(exc, course_id=course_id)
 
-    blocks = [f"IDs for course {course_id}:", "\nStudents:"]
+    blocks = [f"INTERNAL IDs for course {course_id}:", "\nSTUDENTS:"]
     blocks += [
-        f"  [{s['userId']}] {s.get('profile', {}).get('name', {}).get('fullName', 'Unknown')}"
+        f"  - ID: {s['userId']} | Name: {s.get('profile', {}).get('name', {}).get('fullName', 'Unknown')}"
         for s in students
     ] or ["  (none)"]
-    blocks.append("\nAssignments (coursework):")
-    blocks += [f"  [{cw['id']}] {cw.get('title', 'Untitled')}" for cw in coursework] or [
+    blocks.append("\nASSIGNMENTS (coursework):")
+    blocks += [f"  - ID: {cw['id']} | Title: {cw.get('title', 'Untitled')}" for cw in coursework] or [
         "  (none)"
     ]
-    blocks.append("\nTopics:")
-    blocks += [f"  [{t['topicId']}] {t.get('name', 'Unnamed')}" for t in topics] or [
+    blocks.append("\nTOPICS:")
+    blocks += [f"  - ID: {t['topicId']} | Name: {t.get('name', 'Unnamed')}" for t in topics] or [
         "  (none)"
     ]
     return "\n".join(blocks)

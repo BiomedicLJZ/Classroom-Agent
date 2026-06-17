@@ -25,6 +25,9 @@ class GradeResult(TypedDict):
 
 
 class TAState(DeepAgentState):
+    # History summarization
+    summary: NotRequired[str | None]
+
     # Session context
     active_course_id: NotRequired[str | None]
     active_course_name: NotRequired[str | None]

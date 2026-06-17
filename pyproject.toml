@@ -29,6 +29,9 @@ dependencies = [
     "langgraph-checkpoint-sqlite>=3.1.0",
     "tenacity>=9.1.4",
     "prompt-toolkit>=3.0.52",
+    "langchain-google-genai>=4.2.5",
+    "aiosqlite>=0.22.1",
+    "fpdf2>=2.7.0",
 ]
 
 [dependency-groups]

@@ -18,10 +18,10 @@ class TestSettings:
         assert settings.nvidia_api_key == "nvapi-test"
         assert settings.nvidia_model == "meta/llama-3.3-70b-instruct"
 
-    def test_raises_if_nvidia_key_missing(self, monkeypatch):
+    def test_nvidia_key_can_be_missing(self, monkeypatch):
         monkeypatch.delenv("NVIDIA_API_KEY", raising=False)
-        with pytest.raises(Exception):  # noqa: B017
-            Settings()
+        settings = Settings()
+        assert settings.nvidia_api_key == ""
 
     def test_reasoning_defaults(self, monkeypatch):
         monkeypatch.setenv("NVIDIA_API_KEY", "nvapi-test")
@@ -30,7 +30,7 @@ class TestSettings:
         assert settings.nvidia_top_p == 0.95
         assert settings.nvidia_max_tokens == 16384
         assert settings.nvidia_reasoning_budget == 16384
-        assert settings.nvidia_enable_thinking is False
+        assert settings.nvidia_enable_thinking is True
 
     def test_reasoning_overridable_from_env(self, monkeypatch):
         monkeypatch.setenv("NVIDIA_API_KEY", "nvapi-test")
